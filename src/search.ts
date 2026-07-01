@@ -3,7 +3,10 @@
  *
  * `search()` is the single entry point used by both the CLI and the SDK.
  * It normalizes options, dispatches to one or more engine backends, and
- * implements the `auto` fallback chain.
+ * implements the `auto` fallback chain with **quality gating** — meaning
+ * it doesn't just take the first engine that returns *any* results, it
+ * takes the first engine that returns *good* results (measured by how
+ * many results mention a query token in their title/url/snippet).
  */
 import {
   AllEnginesFailedError,
@@ -11,8 +14,30 @@ import {
   type SearchFunctionResultItem,
   type SearchOptions,
 } from "./types.js";
-import { DEFAULT_USER_AGENT, ENGINE_IDS, detectLocale } from "./engines/_shared.js";
-import { AUTO_ENGINE_ORDER, ENGINES } from "./engines/index.js";
+import {
+  DEFAULT_USER_AGENT,
+  ENGINE_IDS,
+  detectLocale,
+  mergeAndRankResults,
+  resultSetQuality,
+} from "./engines/_shared.js";
+import {
+  AUTO_ENGINE_ORDER,
+  AUTO_QUALITY_THRESHOLD,
+  ENGINES,
+} from "./engines/index.js";
+
+/**
+ * Per-engine trust weight, used by `mergeAndRankResults` when the auto
+ * chain falls through to cross-engine merging. Higher = more trusted.
+ * These are empirical — DDG handles long-tail technical queries better
+ * than Bing, so it gets a higher weight.
+ */
+const ENGINE_WEIGHTS: Record<SearchEngineId, number> = {
+  duckduckgo: 1.2,
+  bing: 1.0,
+  google: 1.1,  // when reachable, Google results are good
+};
 
 export interface SearchSuccess<T extends "single" | "auto" = "single" | "auto"> {
   success: true;
@@ -25,6 +50,10 @@ export interface SearchSuccess<T extends "single" | "auto" = "single" | "auto"> 
   elapsedMs: number;
   /** The locale actually used for this call (explicit override or auto-detected). */
   locale: string;
+  /** 0-100 heuristic relevance score for the returned result set. */
+  quality: number;
+  /** Non-fatal warnings (e.g., "no engine cleared the quality gate"). */
+  warnings: string[];
 }
 
 export interface SearchFailure {
@@ -43,9 +72,6 @@ function resolveOptions(opts: SearchOptions = {}) {
   const recency_days = Math.max(0, Math.min(opts.recency_days ?? 0, 365));
   const timeoutMs = Math.max(500, Math.min(opts.timeoutMs ?? 8000, 60_000));
   const userAgent = opts.userAgent?.trim() || DEFAULT_USER_AGENT;
-  // Locale: if the user passed one explicitly, we honor it. Otherwise we
-  // leave it as `null` here and let `search()` auto-detect from the query
-  // (per-call, so each query in a batch gets the right locale).
   const localeExplicit = opts.locale?.trim() || null;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") {
@@ -72,8 +98,7 @@ function resolveOptions(opts: SearchOptions = {}) {
 
 /**
  * Run a search. Throws only on programming errors (bad options, no fetch).
- * Network / parse failures are surfaced via the returned `SearchOutcome`
- * — either `{success: true, ...}` or `{success: false, error, errors?}`.
+ * Network / parse failures are surfaced via the returned `SearchOutcome`.
  */
 export async function search(
   query: string,
@@ -90,12 +115,6 @@ export async function search(
     };
   }
 
-  // Resolve the per-call locale: explicit user override wins, otherwise
-  // auto-detect from the query string. This is the key fix for the
-  // "Chinese query returns garbage from Bing" issue — Bing's `ensearch=1`
-  // flag (which forces the English SERP) interacts badly with non-English
-  // queries, so we have to pick the locale based on what the user is
-  // actually searching for.
   const locale = resolved.localeExplicit ?? detectLocale(query);
 
   const callEngine = (id: SearchEngineId) =>
@@ -112,6 +131,15 @@ export async function search(
   if (resolved.engine !== "auto") {
     try {
       const results = await callEngine(resolved.engine);
+      const quality = resultSetQuality(results, query);
+      const warnings: string[] = [];
+      if (quality < AUTO_QUALITY_THRESHOLD) {
+        warnings.push(
+          `${resolved.engine} returned low-relevance results (quality ${quality}/100). ` +
+          `Try \`--engine auto\` to let the orchestrator pick a better engine, ` +
+          `or \`--engine duckduckgo\` which handles long-tail queries well.`
+        );
+      }
       return {
         success: true,
         results,
@@ -119,6 +147,8 @@ export async function search(
         enginesTried: [resolved.engine],
         elapsedMs: Date.now() - startedAt,
         locale,
+        quality,
+        warnings,
       };
     } catch (err) {
       return {
@@ -129,15 +159,37 @@ export async function search(
     }
   }
 
-  // ---- Auto mode: try engines in order, return first non-empty ----
+  // ---- Auto mode with quality gating + cross-engine merging ----
+  //
+  // Strategy:
+  //   1. Try each engine in AUTO_ENGINE_ORDER.
+  //   2. For each engine that returns results, compute quality.
+  //   3. If quality >= AUTO_QUALITY_THRESHOLD, accept immediately.
+  //   4. Otherwise, remember this result set as "best so far" and try next.
+  //   5. If no engine clears the gate BUT we have >=2 result sets, merge
+  //      them with `mergeAndRankResults` (SearXNG consensus scoring) and
+  //      return the merged set. Cross-engine dedup + relevance ranking
+  //      often rescues a query that no single engine handled well.
+  //   6. If only one engine returned anything, return its result set as
+  //      best-effort with a warning.
+  //   7. If every engine errored, surface as failure.
   const tried: SearchEngineId[] = [];
   const errors: Array<{ engine: SearchEngineId; error: unknown }> = [];
+  // Collect every result set we got, even low-quality ones — we may merge them.
+  const collected: Array<{ engine: SearchEngineId; results: SearchFunctionResultItem[]; quality: number }> = [];
+  const warnings: string[] = [];
 
   for (const id of AUTO_ENGINE_ORDER) {
     tried.push(id);
     try {
       const results = await callEngine(id);
-      if (results.length > 0) {
+      if (results.length === 0) {
+        errors.push({ engine: id, error: new Error("Engine returned 0 results") });
+        continue;
+      }
+      const quality = resultSetQuality(results, query);
+      // Accept immediately if quality clears the gate.
+      if (quality >= AUTO_QUALITY_THRESHOLD && collected.length === 0) {
         return {
           success: true,
           results,
@@ -145,15 +197,70 @@ export async function search(
           enginesTried: tried,
           elapsedMs: Date.now() - startedAt,
           locale,
+          quality,
+          warnings: [],
         };
       }
-      errors.push({ engine: id, error: new Error("Engine returned 0 results") });
+      // Otherwise, remember and keep looking.
+      collected.push({ engine: id, results, quality });
     } catch (err) {
       errors.push({ engine: id, error: err });
-      // continue to next engine
     }
   }
 
+  // No engine cleared the quality gate on its own.
+  if (collected.length > 0) {
+    // If we have 2+ result sets, try merging them — the SearXNG consensus
+    // score often surfaces results that no single engine ranked highly.
+    if (collected.length >= 2) {
+      const mergeInput = collected.map(c => ({
+        engine: c.engine,
+        weight: ENGINE_WEIGHTS[c.engine],
+        results: c.results,
+      }));
+      const merged = mergeAndRankResults(mergeInput, query, resolved.num);
+      const mergedQuality = resultSetQuality(merged, query);
+
+      // Use the merged set if it's better than the best single-engine set.
+      const bestSingle = collected.reduce((a, b) => (b.quality > a.quality ? b : a));
+      if (mergedQuality >= bestSingle.quality) {
+        warnings.push(
+          `Single-engine quality was low (best ${bestSingle.quality}/100 from ${bestSingle.engine}). ` +
+          `Merged ${collected.length} engines (${collected.map(c => c.engine).join(" + ")}) → quality ${mergedQuality}/100.`
+        );
+        return {
+          success: true,
+          results: merged,
+          engine: "auto",  // signal that this is a merged result
+          enginesTried: tried,
+          elapsedMs: Date.now() - startedAt,
+          locale,
+          quality: mergedQuality,
+          warnings,
+        };
+      }
+    }
+
+    // Merge didn't help (or only one engine returned). Return the best single.
+    const best = collected.reduce((a, b) => (b.quality > a.quality ? b : a));
+    warnings.push(
+      `No engine cleared the quality gate (threshold ${AUTO_QUALITY_THRESHOLD}). ` +
+      `Returning best result set from ${best.engine} (quality ${best.quality}/100). ` +
+      `Tried: ${tried.join(" → ")}.`
+    );
+    return {
+      success: true,
+      results: best.results,
+      engine: best.engine,
+      enginesTried: tried,
+      elapsedMs: Date.now() - startedAt,
+      locale,
+      quality: best.quality,
+      warnings,
+    };
+  }
+
+  // Every engine errored — surface as failure.
   const agg = new AllEnginesFailedError(errors);
   return {
     success: false,

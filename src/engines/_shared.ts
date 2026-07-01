@@ -223,6 +223,189 @@ export function isLikelyIrrelevant(item: SearchFunctionResultItem, query: string
   return false;
 }
 
+/**
+ * Heuristic relevance scoring for a result set against the original query.
+ *
+ * Returns a quality score in [0, 100]:
+ *   - 100  = every result mentions at least one query token in title/url/snippet
+ *   - 0    = no result mentions any query token
+ *   - in between = proportional hit rate
+ *
+ * Tokenization:
+ *   - For CJK queries: each CJK ideograph is a token (whole-word matching
+ *     doesn't work for unspaced languages). A "hit" = at least one ideograph
+ *     appears in the result's title/url/host.
+ *   - For Latin queries: split on non-word chars, drop stopwords and tokens
+ *     shorter than 3 chars. A "hit" = any token appears as a substring
+ *     (case-insensitive) in title/url/host/snippet.
+ *
+ * This is the signal the auto-fallback chain uses to decide whether to
+ * try the next engine. The threshold for "acceptable" is 30 (i.e., at
+ * least ~30% of results mention a query token); below that we keep
+ * looking for a better engine.
+ */
+export function resultSetQuality(
+  results: SearchFunctionResultItem[],
+  query: string
+): number {
+  if (results.length === 0) return 0;
+  const q = query.trim();
+  if (!q) return 0;
+
+  const isCJK = /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(q);
+
+  let tokens: string[];
+  if (isCJK) {
+    tokens = [...q].filter(c =>
+      /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(c)
+    );
+    tokens = [...new Set(tokens)];
+  } else {
+    const stop = new Set([
+      "the", "a", "an", "is", "are", "of", "to", "in", "on", "for",
+      "and", "or", "how", "what", "when", "where", "why", "with",
+      "from", "by", "at", "be", "this", "that", "these", "those",
+    ]);
+    tokens = q.toLowerCase()
+      .split(/[^a-z0-9]+/i)
+      .filter(t => t.length >= 3 && !stop.has(t.toLowerCase()));
+    tokens = [...new Set(tokens)];
+  }
+
+  if (tokens.length === 0) return 75;
+
+  let hitCount = 0;
+  for (const r of results) {
+    const hay = isCJK
+      ? `${r.name} ${r.url} ${r.host_name}`.toLowerCase()
+      : `${r.name} ${r.url} ${r.host_name} ${r.snippet}`.toLowerCase();
+    const hit = tokens.some(t => hay.includes(t.toLowerCase()));
+    if (hit) hitCount++;
+  }
+  return Math.round((hitCount / results.length) * 100);
+}
+
+/**
+ * Per-result relevance score, used for sorting merged results across engines.
+ *
+ * Adapted from SearXNG's `calculate_score` formula:
+ *   score = Σ (engine_weight / rank)
+ *
+ * Higher engine weight = more trusted engine. Lower rank = higher position
+ * in that engine's result list (rank 1 is the top hit). A result that
+ * appears in multiple engines accumulates score from each — that's the
+ * cross-engine consensus signal.
+ *
+ * We also apply deedy5's `SimpleFilterRanker` heuristic as a tiebreaker:
+ * results whose title contains a query token beat results whose snippet
+ * contains it beat results with no token hit at all.
+ */
+export function resultRelevanceScore(
+  item: SearchFunctionResultItem,
+  query: string,
+  engineWeight = 1.0
+): number {
+  // SearXNG base: weight / rank. Rank is 1-indexed.
+  let score = engineWeight / Math.max(1, item.rank);
+
+  // deedy5 SimpleFilterRanker tiebreaker: title-hit > snippet-hit > neither.
+  const q = query.trim().toLowerCase();
+  if (q) {
+    const isCJK = /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(q);
+    const name = item.name.toLowerCase();
+    const snip = item.snippet.toLowerCase();
+    if (isCJK) {
+      const chars = [...q].filter(c => /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(c));
+      const nameHit = chars.some(c => name.includes(c));
+      const snipHit = chars.some(c => snip.includes(c));
+      if (nameHit) score += 0.5;
+      if (snipHit) score += 0.2;
+    } else {
+      const stop = new Set(["the", "a", "an", "is", "are", "of", "to", "in", "on", "for", "and", "or", "how"]);
+      const tokens = q.split(/[^a-z0-9]+/i).filter(t => t.length >= 3 && !stop.has(t));
+      const nameHit = tokens.some(t => name.includes(t));
+      const snipHit = tokens.some(t => snip.includes(t));
+      if (nameHit) score += 0.5;
+      if (snipHit) score += 0.2;
+    }
+  }
+  return score;
+}
+
+/**
+ * Merge results from multiple engines, deduplicate by URL, and re-rank
+ * using the SearXNG/deedy5 hybrid score.
+ *
+ * On URL collision (case-insensitive), keep the variant from the engine
+ * that scored it higher OR — if scores tie — the one with the longer
+ * snippet (deedy5's ResultsAggregator rule).
+ *
+ * Returns a new sorted array. Each item's `score` field is overwritten
+ * with the merged relevance score (rounded to nearest integer in [0, 100]
+ * for backwards-compat with the existing score field convention).
+ */
+export function mergeAndRankResults(
+  perEngine: Array<{ engine: SearchEngineId; weight: number; results: SearchFunctionResultItem[] }>,
+  query: string,
+  limit = 10
+): SearchFunctionResultItem[] {
+  // Map from normalized URL → accumulated result + score
+  const merged = new Map<string, { item: SearchFunctionResultItem; score: number }>();
+
+  for (const { engine, weight, results } of perEngine) {
+    for (const r of results) {
+      // Normalize URL for dedup: lowercase, strip trailing slash + query
+      // params that don't affect content (utm_*, fbclid, gclid, etc.).
+      const key = normalizeUrlForDedup(r.url);
+      const contribution = resultRelevanceScore({ ...r, source_engine: engine }, query, weight);
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, {
+          item: { ...r, source_engine: engine },
+          score: contribution,
+        });
+      } else {
+        // Accumulate score across engines (SearXNG consensus signal).
+        existing.score += contribution;
+        // On collision, keep the variant with the longer snippet.
+        if (r.snippet.length > existing.item.snippet.length) {
+          existing.item = { ...r, source_engine: engine };
+        }
+      }
+    }
+  }
+
+  // Sort by accumulated score descending.
+  const sorted = [...merged.values()].sort((a, b) => b.score - a.score);
+
+  // Re-rank 1..N and clamp score to [0, 100] for the public score field.
+  return sorted.slice(0, limit).map((entry, i) => ({
+    ...entry.item,
+    rank: i + 1,
+    score: Math.max(0, Math.min(100, Math.round(entry.score * 25))),  // scale ~4.0 max → 100
+  }));
+}
+
+/** Normalize a URL for deduplication: lowercase host, drop tracking params. */
+function normalizeUrlForDedup(url: string): string {
+  try {
+    const u = new URL(url);
+    // Strip tracking params.
+    const tracking = new Set([
+      "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+      "fbclid", "gclid", "msclkid", "ref", "ref_src", "ref_url",
+      "_ga", "_gl", "si", "feature", "src",
+    ]);
+    for (const k of [...u.searchParams.keys()]) {
+      if (tracking.has(k.toLowerCase())) u.searchParams.delete(k);
+    }
+    // Lowercase host, strip trailing slash on path, drop hash.
+    return `${u.protocol}//${u.hostname.toLowerCase()}${u.pathname.replace(/\/$/, "")}${u.search}`;
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
 /** Type guard for the engine id list. */
 export const ENGINE_IDS: ReadonlyArray<SearchEngineId> = [
   "duckduckgo",

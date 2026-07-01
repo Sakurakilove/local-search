@@ -178,4 +178,28 @@ console.log("\n=== Test 12: explicit --locale override beats auto-detect ===");
   console.log(`  Engine: ${o.engine}, locale: ${o.locale} (user override honored)  PASS`);
 }
 
-console.log("\nAll 12 tests passed ✓");
+console.log("\n=== Test 13: Cross-engine merge rescues bad single-engine results ===");
+{
+  // Bing is known to return brand-homepage garbage for long-tail technical
+  // queries like "Android 15 behavior changes". In auto mode, the quality
+  // gate should detect Bing's low relevance and either:
+  //   (a) accept DDG's high-quality result immediately, OR
+  //   (b) merge DDG + Bing results via SearXNG consensus scoring.
+  // Either way, the top result should mention "Android" + "15".
+  const q = "Android 15 behavior changes API level 35";
+  const o = await search(q, { num: 5, engine: "auto" });
+  if (!o.success) { console.error("FAIL:", o.error); process.exit(1); }
+  console.log(`  Engine: ${o.engine}, quality: ${o.quality}/100, tried: ${o.enginesTried.join(" → ")}`);
+  if (o.warnings.length > 0) o.warnings.forEach(w => console.log(`    ⚠ ${w.slice(0, 100)}`));
+  o.results.slice(0, 3).forEach((r, i) => console.log(`    ${i + 1}. ${r.name.slice(0, 70)}`));
+  // Top result MUST mention "Android" — not just "Machines" or "Wikipedia".
+  const top = o.results[0];
+  const topRelevant = /android/i.test(top.name + " " + top.url + " " + top.host_name);
+  if (!topRelevant) {
+    console.error(`FAIL: top result doesn't mention Android: ${top.name}`);
+    process.exit(1);
+  }
+  console.log("  PASS — top result is on-topic (Android-specific)");
+}
+
+console.log("\nAll 13 tests passed ✓");

@@ -162,9 +162,15 @@ Examples:
 function renderHuman(outcome: SearchOutcome & { success: true }, quiet: boolean): string {
   const lines: string[] = [];
   if (!quiet) {
-    lines.push(`Engine: ${outcome.engine}  |  locale: ${outcome.locale}  |  tried: ${outcome.enginesTried.join(" → ")}  |  ${outcome.elapsedMs}ms  |  ${outcome.results.length} result(s)`);
+    const engineLabel = outcome.engine === "auto" ? "auto (merged)" : outcome.engine;
+    lines.push(`Engine: ${engineLabel}  |  locale: ${outcome.locale}  |  quality: ${outcome.quality}/100  |  tried: ${outcome.enginesTried.join(" → ")}  |  ${outcome.elapsedMs}ms  |  ${outcome.results.length} result(s)`);
     lines.push("=".repeat(72));
-    lines.push("");
+    if (outcome.warnings.length > 0) {
+      for (const w of outcome.warnings) {
+        lines.push(`⚠  ${w}`);
+      }
+      lines.push("");
+    }
   }
   outcome.results.forEach((item, i) => {
     lines.push(`${i + 1}. ${item.name}`);

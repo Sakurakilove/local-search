@@ -76,6 +76,22 @@ export const bingEngine: SearchEngine = {
       // geo of the requester's IP.
       const headers = defaultHeaders(userAgent);
       headers["Accept-Language"] = `${localeNorm},${localeNorm.split("-")[0]};q=0.9,en;q=0.5`;
+      // SearXNG-derived header set: DNT + Sec-GPC + Cache-Control make
+      // the request look more like a privacy-conscious browser, which
+      // seems to reduce Bing's bot heuristic score.
+      headers["DNT"] = "1";
+      headers["Sec-GPC"] = "1";
+      headers["Cache-Control"] = "max-age=0";
+
+      // deedy5's locale cookie trick: set _EDGE_CD and _EDGE_S to lock
+      // the locale at the cookie layer. This is more reliable than URL
+      // params alone — Bing reads these cookies before processing the
+      // query string, so they override geo-IP localization.
+      const lang = localeNorm.split("-")[0] || "en";
+      const countryLower = country.toLowerCase();
+      const edgeCookies = `_EDGE_CD=m=${lang}-${countryLower}&u=${lang}-${countryLower}; _EDGE_S=mkt=${localeNorm}&ui=${localeNorm}`;
+      headers["Cookie"] = edgeCookies;
+
       html = await fetchHtml(url.toString(), {
         fetchImpl,
         headers,
@@ -115,14 +131,16 @@ export const bingEngine: SearchEngine = {
         // Do NOT use `.b_factrow` — that's the URL breadcrumb, not a snippet
         // (e.g., "en.wikipedia.org › wiki › Machine"), and including it was
         // polluting the `snippet` field with URL paths.
-        const snippet = cleanText(
-          $el.find(".b_caption p").first().text() ||
-            $el.find(".b_lineclamp4").first().text() ||
-            $el.find(".b_lineclamp3").first().text() ||
-            $el.find(".b_lineclamp2").first().text()
-        );
-
-        const rawHtml = $el.find(".b_caption p").first().html() || "";
+        //
+        // SearXNG finding: Bing injects a decorative `<span class="algoSlug_icon">`
+        // (usually a `›`-style bullet) into the snippet `<p>`. Strip it before
+        // reading text, or it shows up as a leading glyph in the snippet.
+        const $snippetEl = $el.find(".b_caption p").first().length
+          ? $el.find(".b_caption p").first()
+          : $el.find(".b_lineclamp4, .b_lineclamp3, .b_lineclamp2").first();
+        $snippetEl.find("span.algoSlug_icon").remove();
+        const snippet = cleanText($snippetEl.text());
+        const rawHtml = $snippetEl.html() || "";
 
         const item = makeItem({
           url: realUrl,
