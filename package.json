@@ -1,6 +1,6 @@
 {
   "name": "local-search",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "Web search skill with 4 engines (Brave / DuckDuckGo / Bing / Google), automatic fallback, query rewriting, and quality-gated merging. No API key, no cloud dependency.",
   "license": "MIT",
   "type": "module",

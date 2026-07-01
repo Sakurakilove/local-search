@@ -191,6 +191,11 @@ export function detectLocale(query: string): string {
   if (counts.hangul > 0) return "ko-KR";
   // No kana/hangul → CJK ideographs mean Chinese (or rarer CJK-using
   // languages; we default to zh-CN as that's by far the most common).
+  //
+  // IMPORTANT: even a SINGLE CJK ideograph means the query has Chinese
+  // intent — don't let Latin tokens (like "iPhone 15 Pro 价格" which has
+  // 2 Latin words + 2 CJK chars) fool us into picking en-US. The CJK
+  // chars are the disambiguator.
   if (counts.cjk > 0) return "zh-CN";
   if (counts.cyrillic > 0) return "ru-RU";
   if (counts.arabic > 0) return "ar-SA";
@@ -661,8 +666,11 @@ export function rewriteQuery(
     if (/苹果\s*\d/i.test(q) && !/iphone|apple/i.test(q)) {
       return `${q} iPhone`;
     }
-    // 特斯拉 → Tesla 汽车
-    if (/特斯拉/i.test(q) && !/tesla|汽车|电动车/i.test(q)) {
+    // 特斯拉 → Tesla 汽车 (trigger on ANY mention of 特斯拉, not just
+    // when "Tesla" is absent — Bing splits 特斯拉 into single chars and
+    // returns dictionary entries for "特". Adding "Tesla 汽车" forces Bing
+    // to treat it as a brand name.)
+    if (/特斯拉/.test(q) && !/tesla/i.test(q)) {
       return `${q} Tesla 汽车`;
     }
     // 小米 + 产品 → Xiaomi (already handled by context, but add for safety)
@@ -672,6 +680,32 @@ export function rewriteQuery(
     // 华为 → Huawei
     if (/华为/.test(q) && !/huawei/i.test(q)) {
       return `${q} Huawei`;
+    }
+    // Chinese query words that Bing misinterprets as single-char lookups.
+    // "怎么注册支付宝" → Bing returns dictionary entry for "怎么".
+    // Fix: if the query starts with a common Chinese question word AND
+    // contains a brand/product name, the brand name is the real subject.
+    // We rewrite to put the brand name first.
+    const cnQuestionWords = /^(怎么|如何|哪里|哪儿|为什么|为何|是不是|是不是|请问)/;
+    if (cnQuestionWords.test(q)) {
+      // Extract any known brand/product term from the query.
+      const brands: Record<string, string> = {
+        "支付宝": "支付宝 Alipay",
+        "微信": "微信 WeChat",
+        "淘宝": "淘宝 Taobao",
+        "京东": "京东 JD",
+        "抖音": "抖音 TikTok",
+        "小红书": "小红书 RED",
+        "哔哩哔哩": "哔哩哔哩 B站",
+        "b站": "哔哩哔哩 B站",
+      };
+      for (const [cn, rewritten] of Object.entries(brands)) {
+        if (q.includes(cn)) {
+          // Rewrite: drop the question word, lead with the brand.
+          const stripped = q.replace(cnQuestionWords, "").trim();
+          return `${rewritten} ${stripped}`;
+        }
+      }
     }
   }
 
