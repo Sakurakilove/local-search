@@ -10,7 +10,7 @@ license: MIT
 > Direct HTML scraping of DuckDuckGo / Bing / Google · resilient to rate-limiting · canonical result schema.
 
 [![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red)](https://clawhub.ai/@Sakurakilove/local-search)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue)](https://github.com/Sakurakilove/local-search)
+[![Version](https://img.shields.io/badge/version-1.2.1-blue)](https://github.com/Sakurakilove/local-search)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/Sakurakilove/local-search/blob/main/LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 
@@ -426,3 +426,7 @@ It's intentionally tiny — a smoke-test you can eyeball, not a feature showcase
 - **SDK**: `import { search, searchOrThrow } from "local-search"`.
 - **First-time setup**: `cd skills/local-search && npm install`.
 - **Quick test**: `tsx scripts/web_search.ts`.
+
+## Acknowledgements
+
+The canonical `SearchFunctionResultItem` shape was inspired by [`z-ai-web-dev-sdk`](https://www.npmjs.com/package/z-ai-web-dev-sdk)'s MIT-licensed `web-search` skill. All engine backend code in this package is original.

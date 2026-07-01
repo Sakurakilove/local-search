@@ -22,4 +22,4 @@ export { ENGINES, AUTO_ENGINE_ORDER } from "./engines/index.js";
 export { ENGINE_IDS, DEFAULT_USER_AGENT } from "./engines/_shared.js";
 
 // Semver-style version. Keep in sync with package.json.
-export const VERSION = "1.2.0";
+export const VERSION = "1.2.1";

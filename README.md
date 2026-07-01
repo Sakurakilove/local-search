@@ -1,7 +1,9 @@
 # local-search
 
+> **Languages**: [English](./README.md) · [简体中文](./README.zh-CN.md)
+
 [![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6eiIvPjwvc3ZnPg==)](https://clawhub.ai/@Sakurakilove/local-search)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue)](https://github.com/Sakurakilove/local-search/releases)
+[![Version](https://img.shields.io/badge/version-1.2.1-blue)](https://github.com/Sakurakilove/local-search/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg?logo=typescript)](https://www.typescriptlang.org/)
@@ -116,7 +118,7 @@ Expected output: 8 tests pass. If your IP is being rate-limited by DDG, the test
 
 ## Acknowledgements
 
-The result schema and original skill structure were inspired by an earlier ClawHub skill of the same name. That project's MIT-licensed design shaped the `SearchFunctionResultItem` shape used here; all backend code is original.
+The result schema and original skill structure were inspired by [`z-ai-web-dev-sdk`](https://www.npmjs.com/package/z-ai-web-dev-sdk)'s `web-search` skill. That project's MIT-licensed design shaped the `SearchFunctionResultItem` shape used here; all engine backend code in this package is original.
 
 ## License
 
