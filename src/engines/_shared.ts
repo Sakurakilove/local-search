@@ -634,6 +634,22 @@ export function rewriteQuery(
     // Don't add anything; the word itself is the signal.
   }
 
+  // --- 4b. "best X" queries ---
+  // Bing has a known bug: queries starting with "best" get misinterpreted
+  // as searches for Best Buy / the word "best" (dictionary). Strip the
+  // leading "best" — the remaining "X 2024" query returns the same
+  // recommendation articles without triggering Bing's bug.
+  // Only strip if "best" is the FIRST word and there are 2+ other words.
+  if (!isCJK && /^\s*best\s+\S/i.test(q)) {
+    const stripped = q.replace(/^\s*best\s+/i, "").trim();
+    // Only apply if the remaining query has at least 2 tokens (don't strip
+    // "best" from "best restaurants" → "restaurants" which is too vague).
+    const tokenCount = stripped.split(/\s+/).filter(t => t.length > 0).length;
+    if (tokenCount >= 2) {
+      return stripped;
+    }
+  }
+
   // --- 5. Chinese ambiguous brand names ---
   // "苹果" alone is ambiguous (Apple Inc vs fruit). When followed by a
   // product number ("苹果16", "苹果15"), the user almost certainly means
