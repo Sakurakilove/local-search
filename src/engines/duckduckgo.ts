@@ -21,6 +21,7 @@ import {
   cleanText,
   defaultHeaders,
   fetchHtml,
+  isLikelyIrrelevant,
   loadCheerio,
   makeItem,
   scoreItem,
@@ -111,11 +112,13 @@ export const duckduckgoEngine: SearchEngine = {
         const title = cleanText($link.text()) || cleanText($block.find(".result__title").text());
         if (!title) return;
 
-        const snippet = cleanText(
-          $block.find(".result__snippet").text() ||
-            $block.find(".result__snippet a").text() ||
-            $block.find(".snippet").text()
-        );
+        // DDG wraps the snippet in `.result__snippet`, but it sometimes
+        // contains nested `<a>` links to "related searches". We extract
+        // just the first text node to avoid noise.
+        const $snippet = $block.find(".result__snippet").first();
+        // Strip nested links' text (related-search chips) before reading.
+        $snippet.find("a").remove();
+        const snippet = cleanText($snippet.text());
 
         const rawHtml = $block.find(".result__snippet").html() || "";
 
@@ -128,6 +131,8 @@ export const duckduckgoEngine: SearchEngine = {
           raw_html: rawHtml || undefined,
         });
         item.score = scoreItem(item, query);
+        // Defensive: drop search-redirect URLs and empty-title junk.
+        if (isLikelyIrrelevant(item, query)) return;
         items.push(item);
       });
 

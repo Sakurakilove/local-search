@@ -10,7 +10,7 @@ license: MIT
 > Direct HTML scraping of DuckDuckGo / Bing / Google · resilient to rate-limiting · canonical result schema.
 
 [![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red)](https://clawhub.ai/@Sakurakilove/local-search)
-[![Version](https://img.shields.io/badge/version-1.2.1-blue)](https://github.com/Sakurakilove/local-search)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue)](https://github.com/Sakurakilove/local-search)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/Sakurakilove/local-search/blob/main/LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 
@@ -30,11 +30,19 @@ Each result is a `SearchFunctionResultItem` with the canonical 7 fields (`url`, 
 
 ## 🚀 Quick Start
 
+**One-line install** (ClawHub CLI):
+
+```bash
+npx clawhub install @Sakurakilove/local-search
+```
+
+**Manual setup** (clone + npm install):
+
 ```bash
 # 1. Install (one runtime dep: cheerio)
 cd skills/local-search && npm install
 
-# 2. Search (auto-fallback across DDG → Bing → Google)
+# 2. Search (auto-fallback across DDG → Bing; Google excluded from auto chain)
 tsx bin/web-search.ts "artificial intelligence"
 
 # 3. Pin a specific engine + locale

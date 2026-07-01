@@ -22,12 +22,18 @@ export const ENGINES: Record<SearchEngineId, SearchEngine> = {
  * Order used by `engine: "auto"`.
  *
  * Rationale:
- *  1. DuckDuckGo — least aggressive blocking, no consent walls.
- *  2. Bing       — usually stable, occasional locale quirks.
- *  3. Google     — best results, but most likely to be blocked / consented.
+ *  1. DuckDuckGo — least aggressive blocking, finest-grained date filter,
+ *     best CJK support of the three.
+ *  2. Bing       — usually stable from any IP including datacenter; the
+ *     second-line fallback when DDG rate-limits us.
+ *
+ * Google is deliberately EXCLUDED from the auto chain. From datacenter /
+ * cloud IPs Google returns a "please enable JS" redirect page with zero
+ * parseable results ~95% of the time — including it just wastes 8s before
+ * failing. Users who specifically want Google can pass `--engine google`
+ * explicitly; from residential IPs it usually works fine.
  */
 export const AUTO_ENGINE_ORDER: SearchEngineId[] = [
   "duckduckgo",
   "bing",
-  "google",
 ];

@@ -71,10 +71,14 @@ export interface SearchOptions {
    */
   userAgent?: string;
   /**
-   * Optional locale override for engines that support it. Default: "en-US".
-   * Pass e.g. "zh-CN" to ask Bing for Chinese results, "ja-JP" for Japanese, etc.
-   * Bing is the most responsive to this (cc + mkt + setlang). DuckDuckGo
-   * largely ignores it. Google uses hl/gl.
+   * Optional locale override for engines that support it. Default: auto-detect
+   * from the query string (CJK → zh-CN, kana → ja-JP, hangul → ko-KR,
+   * Cyrillic → ru-RU, etc.; Latin/default → en-US).
+   *
+   * Pass e.g. "zh-CN", "ja-JP", "en-GB" to override the auto-detection.
+   * Bing is the most responsive to this (cc + mkt + setlang, plus `ensearch=1`
+   * for English locales only). DuckDuckGo largely ignores it. Google uses
+   * hl/gl.
    */
   locale?: string;
 }

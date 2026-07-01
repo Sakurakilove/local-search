@@ -3,7 +3,7 @@
 > **语言**：[English](./README.md) · [简体中文](./README.zh-CN.md)
 
 [![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6eiIvPjwvc3ZnPg==)](https://clawhub.ai/@Sakurakilove/local-search)
-[![Version](https://img.shields.io/badge/version-1.2.1-blue)](https://github.com/Sakurakilove/local-search/releases)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue)](https://github.com/Sakurakilove/local-search/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg?logo=typescript)](https://www.typescriptlang.org/)
@@ -15,6 +15,14 @@
 每条结果是一个 `SearchFunctionResultItem`，包含 `url`、`name`、`snippet`、`host_name`、`rank`、`date`、`favicon` 七个标准字段，外加三个扩展字段：`source_engine`、`raw_html`、`score`。
 
 ## 快速开始
+
+**一键安装**（ClawHub CLI）：
+
+```bash
+npx clawhub install @Sakurakilove/local-search
+```
+
+**手动安装**（clone 本仓库）：
 
 ```bash
 # 1. 安装唯一的运行时依赖
@@ -34,8 +42,8 @@ tsx bin/web-search.ts "AI 新闻" --recency-days 1 --json -o ai_news.json
 - **无需 API Key** —— 直接调用公开搜索引擎。
 - **没有中间跳板** —— 你的机器 → 搜索引擎，之间没有任何云服务。
 - **完全透明** —— 每条结果都带 `source_engine` 字段，你能看到是哪个引擎回答的。
-- **健壮容错** —— DDG 限流时，编排器自动切到 Bing，再不行切到 Google。
-- **支持 locale** —— `--locale en-US` / `zh-CN` / `ja-JP` / 任意 BCP-47 标签。对非美国 IP 尤其关键 —— 否则 Bing 即使收到英文查询也会返回本地化结果。
+- **健壮容错** —— DDG 限流时，编排器自动切到 Bing。Google 已从 auto 链路移除（数据中心 IP 几乎都返回 enablejs 墙）；如需 Google，请显式传 `--engine google`。
+- **Locale 自动识别** —— 根据查询文本自动选择 locale（CJK → zh-CN，假名 → ja-JP，韩文 → ko-KR，西里尔 → ru-RU 等；拉丁/默认 → en-US）。可用 `--locale <BCP-47>` 覆盖。对非英文查询至关重要 —— Bing 的 `ensearch=1`（强制英文 SERP）对 CJK 查询会返回垃圾结果，所以只在英文 locale 下才设。
 
 ## 文件结构
 

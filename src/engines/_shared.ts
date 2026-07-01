@@ -145,6 +145,84 @@ export function scoreItem(item: SearchFunctionResultItem, query: string): number
   return Math.max(0, Math.min(100, score));
 }
 
+/**
+ * Heuristic language detection from a query string.
+ * Returns a BCP-47 locale tag.
+ *
+ * Uses Unicode block ranges to detect the dominant script:
+ * - CJK Unified Ideographs → "zh-CN" (covers Chinese; JP/KR queries usually
+ *   also contain kana/hangul which we check first)
+ * - Hiragana / Katakana → "ja-JP"
+ * - Hangul → "ko-KR"
+ * - Cyrillic → "ru-RU"
+ * - Arabic → "ar-SA"
+ * - Thai → "th-TH"
+ * - Hebrew → "he-IL"
+ * - Greek → "el-GR"
+ * - Default (Latin / mixed / empty) → "en-US"
+ *
+ * This is intentionally simple — we only need to pick a reasonable locale
+ * for the search engine, not do real NLP. If the user explicitly passes
+ * `locale` in SearchOptions, that always wins (see `resolveOptions`).
+ */
+export function detectLocale(query: string): string {
+  if (!query) return "en-US";
+  // Tally characters per script.
+  const counts = { cjk: 0, hira: 0, kata: 0, hangul: 0, cyrillic: 0, arabic: 0, thai: 0, hebrew: 0, greek: 0, latin: 0 };
+  for (const ch of query) {
+    const cp = ch.codePointAt(0)!;
+    if (cp >= 0x3040 && cp <= 0x309f) counts.hira++;
+    else if (cp >= 0x30a0 && cp <= 0x30ff) counts.kata++;
+    else if (cp >= 0xac00 && cp <= 0xd7af) counts.hangul++;
+    else if (cp >= 0x4e00 && cp <= 0x9fff) counts.cjk++;
+    else if (cp >= 0x0400 && cp <= 0x04ff) counts.cyrillic++;
+    else if (cp >= 0x0600 && cp <= 0x06ff) counts.arabic++;
+    else if (cp >= 0x0e00 && cp <= 0x0e7f) counts.thai++;
+    else if (cp >= 0x0590 && cp <= 0x05ff) counts.hebrew++;
+    else if (cp >= 0x0370 && cp <= 0x03ff) counts.greek++;
+    else if (cp >= 0x0041 && cp <= 0x024f) counts.latin++;
+  }
+  // Japanese and Korean have unique scripts (kana, hangul) that Chinese
+  // doesn't. They usually appear alongside CJK ideographs (because both
+  // languages use kanji/hanja to varying degrees), so we check them FIRST
+  // — even a single kana/hangul character means it's Japanese/Korean,
+  // regardless of how many CJK ideographs there are.
+  if (counts.hira > 0 || counts.kata > 0) return "ja-JP";
+  if (counts.hangul > 0) return "ko-KR";
+  // No kana/hangul → CJK ideographs mean Chinese (or rarer CJK-using
+  // languages; we default to zh-CN as that's by far the most common).
+  if (counts.cjk > 0) return "zh-CN";
+  if (counts.cyrillic > 0) return "ru-RU";
+  if (counts.arabic > 0) return "ar-SA";
+  if (counts.thai > 0) return "th-TH";
+  if (counts.hebrew > 0) return "he-IL";
+  if (counts.greek > 0) return "el-GR";
+  return "en-US";
+}
+
+/**
+ * Returns true if a result item is obviously irrelevant and should be dropped:
+ * - URL points back into a search engine's own domain (search redirect, "did
+ *   you mean" page, etc.)
+ * - Title is empty / pure whitespace / identical to the query (suggests a
+ *   "search suggestion" entry, not a real result)
+ *
+ * This is a defensive filter; engines should already not return such items,
+ * but layouts drift and this catches the worst offenders.
+ */
+export function isLikelyIrrelevant(item: SearchFunctionResultItem, query: string): boolean {
+  const url = item.url.toLowerCase();
+  const name = (item.name || "").trim();
+  if (!name) return true;
+  if (name.toLowerCase() === query.trim().toLowerCase()) return true;
+  // Self-referential search-engine domains — never a real result.
+  if (/bing\.com\/(?:ck\/a|a\.|search|form=)/i.test(url)) return true;
+  if (/duckduckgo\.com\/(?:y\.js|ad|spice|lite)/i.test(url)) return true;
+  if (/google\.com\/(?:url\?|search|maps|calendar)/i.test(url)) return true;
+  if (/search\.yahoo\.com|baidu\.com\/(?:s|link)/i.test(url)) return true;
+  return false;
+}
+
 /** Type guard for the engine id list. */
 export const ENGINE_IDS: ReadonlyArray<SearchEngineId> = [
   "duckduckgo",

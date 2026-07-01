@@ -21,6 +21,7 @@ import {
   cleanText,
   defaultHeaders,
   fetchHtml,
+  isLikelyIrrelevant,
   loadCheerio,
   makeItem,
   scoreItem,
@@ -35,19 +36,28 @@ export const bingEngine: SearchEngine = {
     const url = new URL("https://www.bing.com/search");
     url.searchParams.set("q", query);
     url.searchParams.set("count", String(Math.max(num, 10)));
-    // Locale forcing: from non-US IPs (notably China), Bing redirects to
-    // cn.bing.com and serves localized results even when the query is
-    // English. The combination `cc=<country>` + `mkt=<locale>` +
-    // `setlang=<locale>` + `ensearch=1` + `form=QBLH` is what reliably
-    // pins the SERP to the requested locale.
-    // `cc` is the key parameter — it sets the country code which overrides
-    // geo-IP localization.
+    // Locale forcing strategy:
+    //
+    //   - `cc=<country>` + `mkt=<locale>` + `setlang=<locale>` are the
+    //     standard Bing locale params. They work fine on their own.
+    //   - `ensearch=1` is a special flag that *forces the English SERP*
+    //     regardless of geo-IP. This is essential for English queries from
+    //     non-US IPs (otherwise Bing localizes to the IP's country).
+    //     BUT it is POISON for non-English queries — Bing's English SERP
+    //     misinterprets CJK / Cyrillic / etc. queries and returns totally
+    //     irrelevant results (e.g., "巴黎奥运会" returns Microsoft Teams
+    //     error pages).
+    //   - Therefore: only set `ensearch=1` when the locale is English.
+    //     For other locales, rely on `cc` + `mkt` + `setlang` alone.
     const localeNorm = locale.trim();
     const country = localeNorm.split("-")[1]?.toUpperCase() || "US";
+    const isEnglishLocale = localeNorm.toLowerCase().startsWith("en-");
     url.searchParams.set("cc", country);
     url.searchParams.set("mkt", localeNorm);
     url.searchParams.set("setlang", localeNorm);
-    url.searchParams.set("ensearch", "1");
+    if (isEnglishLocale) {
+      url.searchParams.set("ensearch", "1");
+    }
     url.searchParams.set("form", "QBLH");
     // Bing freshness filter: "d1" = past day, "w1" = past week, "m1" = past month.
     // Bing's URL API does not accept arbitrary N days; we fall back to
@@ -101,14 +111,18 @@ export const bingEngine: SearchEngine = {
         const title = cleanText($link.text());
         if (!title) return;
 
-        // Snippet: Bing keeps it under `.b_caption p` (sometimes `.b_lineclamp4`).
+        // Snippet: Bing keeps it under `.b_caption p` (sometimes `.b_lineclamp*`).
+        // Do NOT use `.b_factrow` — that's the URL breadcrumb, not a snippet
+        // (e.g., "en.wikipedia.org › wiki › Machine"), and including it was
+        // polluting the `snippet` field with URL paths.
         const snippet = cleanText(
-          $el.find(".b_caption p").text() ||
-            $el.find(".b_lineclamp4").text() ||
-            $el.find(".b_factrow").text()
+          $el.find(".b_caption p").first().text() ||
+            $el.find(".b_lineclamp4").first().text() ||
+            $el.find(".b_lineclamp3").first().text() ||
+            $el.find(".b_lineclamp2").first().text()
         );
 
-        const rawHtml = $el.find(".b_caption p").html() || "";
+        const rawHtml = $el.find(".b_caption p").first().html() || "";
 
         const item = makeItem({
           url: realUrl,
@@ -119,15 +133,23 @@ export const bingEngine: SearchEngine = {
           raw_html: rawHtml || undefined,
         });
 
-        // Bing sometimes embeds a publish date in `.news_dt`. Note: do NOT
-        // pull from `.b_attribution cite` — that element contains the URL
-        // breadcrumb (e.g. "en.wikipedia.org › wiki › Machine"), not a date.
+        // Bing sometimes embeds a publish date in `.news_dt`. Strict pattern:
+        // accept only strings that look like a date or relative time, and
+        // reject anything containing URL characters (those are breadcrumbs
+        // leaking in from `.b_attribution cite`).
         const dateText = cleanText($el.find(".news_dt").first().text());
-        if (dateText && /\d{4}|hour|day|minute|ago/i.test(dateText)) {
+        if (
+          dateText &&
+          !/[\/<>]/.test(dateText) &&
+          !dateText.includes("http") &&
+          /\d{4}|hour|day|minute|second|ago|年|月|日/i.test(dateText)
+        ) {
           item.date = dateText;
         }
 
         item.score = scoreItem(item, query);
+        // Defensive: drop obvious garbage (search-redirect URLs, empty titles).
+        if (isLikelyIrrelevant(item, query)) return;
         items.push(item);
       });
 

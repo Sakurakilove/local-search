@@ -3,7 +3,7 @@
 > **Languages**: [English](./README.md) · [简体中文](./README.zh-CN.md)
 
 [![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6eiIvPjwvc3ZnPg==)](https://clawhub.ai/@Sakurakilove/local-search)
-[![Version](https://img.shields.io/badge/version-1.2.1-blue)](https://github.com/Sakurakilove/local-search/releases)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue)](https://github.com/Sakurakilove/local-search/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg?logo=typescript)](https://www.typescriptlang.org/)
@@ -15,6 +15,14 @@ Web search skill that runs entirely on the user's machine. Scrapes the public SE
 Each result is a `SearchFunctionResultItem` with `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`, plus three extension fields: `source_engine`, `raw_html`, `score`.
 
 ## Quick Start
+
+**One-line install** (ClawHub CLI):
+
+```bash
+npx clawhub install @Sakurakilove/local-search
+```
+
+**Manual setup** (clone this repo):
 
 ```bash
 # 1. install the one runtime dependency
@@ -34,8 +42,8 @@ tsx bin/web-search.ts "AI news" --recency-days 1 --json -o ai_news.json
 - **No API key** — calls the public search engines directly.
 - **No network hop** — your machine → engine, nothing in between.
 - **Transparent** — every result carries a `source_engine` field so you can see who answered.
-- **Resilient** — if DDG is rate-limiting you, the orchestrator silently falls through to Bing, then Google.
-- **Locale-aware** — `--locale en-US` / `zh-CN` / `ja-JP` / any BCP-47 tag. Critical for non-US IPs where Bing otherwise serves localized results even for English queries.
+- **Resilient** — if DDG is rate-limiting you, the orchestrator silently falls through to Bing. Google is excluded from the auto chain (it almost always returns a JS-required wall from datacenter IPs); pass `--engine google` explicitly if you need it.
+- **Locale-aware** — locale is **auto-detected from the query** (CJK → zh-CN, kana → ja-JP, hangul → ko-KR, Cyrillic → ru-RU, etc.; Latin/default → en-US). Override with `--locale <BCP-47>` if needed. Critical for non-English queries — Bing's `ensearch=1` flag (English SERP) returns garbage for CJK queries, so we only set it for English locales.
 
 ## Files
 
@@ -86,7 +94,8 @@ Options:
   --num, -n <N>          Number of results (default: 10)
   --engine, -e <id>      duckduckgo | bing | google | auto  (default: auto)
   --recency-days, -r <N> Restrict to results from last N days
-  --locale <BCP-47>      Result locale, e.g. en-US (default), zh-CN, ja-JP
+  --locale <BCP-47>      Result locale (default: auto-detect from query;
+                          e.g. en-US, zh-CN, ja-JP, ko-KR, ru-RU)
   --timeout <ms>         Per-engine timeout (default: 8000)
   --json                  Emit JSON
   --output, -o <path>     Write JSON to file
@@ -102,7 +111,7 @@ Options:
 | Bing | `https://www.bing.com/search` | none | high | high | `freshness=d1\|w1\|m1` (bucketed) |
 | Google | `https://www.google.com/search` | none | medium | low (enablejs wall) | `tbs=qdr:d\|w\|m\|y` (bucketed) |
 
-`engine: "auto"` (the default) tries them in the order DuckDuckGo → Bing → Google, returning the first non-empty result set. From a datacenter IP, the effective chain is DDG → Bing (Google is usually blocked); from a residential IP, all three are viable.
+`engine: "auto"` (the default) tries them in the order DuckDuckGo → Bing, returning the first non-empty result set. **Google is excluded from the auto chain** — from datacenter IPs it almost always returns a "please enable JS" wall with zero parseable results, so including it just wastes 8s before failing. From a residential IP you can still pass `--engine google` explicitly.
 
 The chain is configurable — edit `AUTO_ENGINE_ORDER` in `src/engines/index.ts`.
 
@@ -114,7 +123,7 @@ After `npm install`, run the included e2e test to confirm everything works on yo
 tsx scripts/test.ts
 ```
 
-Expected output: 8 tests pass. If your IP is being rate-limited by DDG, the test still passes because auto-mode falls through to Bing — Test 6 in the suite explicitly verifies this fallback path.
+Expected output: 12 tests pass. The suite doesn't just check "did the engine return *something*" — it checks "did at least one result mention a query term" (Test 9 / 10 / 11), which catches the relevance regressions that pure "any-results-returned" tests miss.
 
 ## Acknowledgements
 

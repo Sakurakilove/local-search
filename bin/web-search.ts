@@ -11,7 +11,8 @@
  *   --num, -n <N>          Number of results (default: 10, max: 50)
  *   --engine, -e <id>      duckduckgo | bing | google | auto  (default: auto)
  *   --recency-days, -r <N> Restrict to results from last N days
- *   --locale <BCP-47>      Result locale, e.g. en-US (default), zh-CN, ja-JP
+ *   --locale <BCP-47>      Result locale (default: auto-detect from query;
+ *                          e.g. en-US, zh-CN, ja-JP, ko-KR, ru-RU)
  *   --timeout <ms>         Per-engine timeout in ms (default: 8000)
  *   --json                  Emit results as JSON (default: human-readable)
  *   --output, -o <path>     Write JSON to file instead of stdout
@@ -49,7 +50,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     num: 10,
     engine: "auto",
     recencyDays: 0,
-    locale: "en-US",
+    locale: "",  // empty = auto-detect from query
     timeoutMs: 8000,
     json: false,
     pretty: true,
@@ -102,9 +103,9 @@ function parseArgs(argv: string[]): ParsedArgs {
         }
         break;
       case "--locale":
-        out.locale = args[++i] ?? "en-US";
-        if (!/^[a-z]{2,3}-[A-Z]{2,3}$/i.test(out.locale)) {
-          throw new Error(`Invalid locale "${out.locale}". Use BCP-47 like en-US, zh-CN, ja-JP.`);
+        out.locale = args[++i] ?? "";
+        if (out.locale && !/^[a-z]{2,3}-[A-Z]{2,3}$/i.test(out.locale)) {
+          throw new Error(`Invalid locale "${out.locale}". Use BCP-47 like en-US, zh-CN, ja-JP, or leave empty for auto-detect.`);
         }
         break;
       case "--timeout":
@@ -142,7 +143,8 @@ Options:
   --num, -n <N>          Number of results (default: 10, max: 50)
   --engine, -e <id>      duckduckgo | bing | google | auto  (default: auto)
   --recency-days, -r <N> Restrict to results from last N days
-  --locale <BCP-47>      Result locale, e.g. en-US (default), zh-CN, ja-JP
+  --locale <BCP-47>      Result locale (default: auto-detect from query;
+                          e.g. en-US, zh-CN, ja-JP, ko-KR, ru-RU)
   --timeout <ms>         Per-engine timeout in ms (default: 8000)
   --json                  Emit JSON output (default: human-readable)
   --output, -o <path>     Write JSON to file instead of stdout
@@ -154,13 +156,13 @@ Examples:
   tsx bin/web-search.ts "artificial intelligence"
   tsx bin/web-search.ts "machine learning" --num 5 --engine duckduckgo
   tsx bin/web-search.ts "AI breakthroughs" --recency-days 7 --json -o ai_news.json
-  tsx bin/web-search.ts "人工智能" --locale zh-CN --engine bing
+  tsx bin/web-search.ts "人工智能" --engine bing   (locale auto-detects zh-CN)
 `;
 
 function renderHuman(outcome: SearchOutcome & { success: true }, quiet: boolean): string {
   const lines: string[] = [];
   if (!quiet) {
-    lines.push(`Engine: ${outcome.engine}  |  tried: ${outcome.enginesTried.join(" → ")}  |  ${outcome.elapsedMs}ms  |  ${outcome.results.length} result(s)`);
+    lines.push(`Engine: ${outcome.engine}  |  locale: ${outcome.locale}  |  tried: ${outcome.enginesTried.join(" → ")}  |  ${outcome.elapsedMs}ms  |  ${outcome.results.length} result(s)`);
     lines.push("=".repeat(72));
     lines.push("");
   }
@@ -201,7 +203,7 @@ async function main() {
     num: parsed.num,
     engine: parsed.engine,
     recency_days: parsed.recencyDays,
-    locale: parsed.locale,
+    locale: parsed.locale || undefined,
     timeoutMs: parsed.timeoutMs,
   });
 

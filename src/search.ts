@@ -11,7 +11,7 @@ import {
   type SearchFunctionResultItem,
   type SearchOptions,
 } from "./types.js";
-import { DEFAULT_USER_AGENT, ENGINE_IDS } from "./engines/_shared.js";
+import { DEFAULT_USER_AGENT, ENGINE_IDS, detectLocale } from "./engines/_shared.js";
 import { AUTO_ENGINE_ORDER, ENGINES } from "./engines/index.js";
 
 export interface SearchSuccess<T extends "single" | "auto" = "single" | "auto"> {
@@ -23,6 +23,8 @@ export interface SearchSuccess<T extends "single" | "auto" = "single" | "auto"> 
   enginesTried: T extends "auto" ? SearchEngineId[] : [SearchEngineId];
   /** How long the call took in ms. */
   elapsedMs: number;
+  /** The locale actually used for this call (explicit override or auto-detected). */
+  locale: string;
 }
 
 export interface SearchFailure {
@@ -41,8 +43,10 @@ function resolveOptions(opts: SearchOptions = {}) {
   const recency_days = Math.max(0, Math.min(opts.recency_days ?? 0, 365));
   const timeoutMs = Math.max(500, Math.min(opts.timeoutMs ?? 8000, 60_000));
   const userAgent = opts.userAgent?.trim() || DEFAULT_USER_AGENT;
-  // Default to en-US. Accept BCP-47 tags like "zh-CN", "ja-JP", "en-GB".
-  const locale = (opts.locale ?? "en-US").trim() || "en-US";
+  // Locale: if the user passed one explicitly, we honor it. Otherwise we
+  // leave it as `null` here and let `search()` auto-detect from the query
+  // (per-call, so each query in a batch gets the right locale).
+  const localeExplicit = opts.locale?.trim() || null;
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   if (typeof fetchImpl !== "function") {
     throw new Error(
@@ -60,7 +64,7 @@ function resolveOptions(opts: SearchOptions = {}) {
     recency_days,
     timeoutMs,
     userAgent,
-    locale,
+    localeExplicit,
     fetchImpl,
     engine: engineRaw as SearchEngineId | "auto",
   };
@@ -86,13 +90,21 @@ export async function search(
     };
   }
 
+  // Resolve the per-call locale: explicit user override wins, otherwise
+  // auto-detect from the query string. This is the key fix for the
+  // "Chinese query returns garbage from Bing" issue — Bing's `ensearch=1`
+  // flag (which forces the English SERP) interacts badly with non-English
+  // queries, so we have to pick the locale based on what the user is
+  // actually searching for.
+  const locale = resolved.localeExplicit ?? detectLocale(query);
+
   const callEngine = (id: SearchEngineId) =>
     ENGINES[id].search(query, {
       num: resolved.num,
       recency_days: resolved.recency_days,
       timeoutMs: resolved.timeoutMs,
       userAgent: resolved.userAgent,
-      locale: resolved.locale,
+      locale,
       fetchImpl: resolved.fetchImpl as typeof fetch,
     });
 
@@ -106,6 +118,7 @@ export async function search(
         engine: resolved.engine,
         enginesTried: [resolved.engine],
         elapsedMs: Date.now() - startedAt,
+        locale,
       };
     } catch (err) {
       return {
@@ -131,6 +144,7 @@ export async function search(
           engine: id,
           enginesTried: tried,
           elapsedMs: Date.now() - startedAt,
+          locale,
         };
       }
       errors.push({ engine: id, error: new Error("Engine returned 0 results") });
