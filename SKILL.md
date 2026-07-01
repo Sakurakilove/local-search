@@ -1,16 +1,84 @@
 ---
 name: local-search
-description: Web search skill that runs entirely on the user's machine — no Z.AI / cloud SDK dependency. Uses DuckDuckGo, Bing, and Google HTML scraping as interchangeable backends with automatic engine fallback. Use this skill when the user needs to search the web for real-time information, retrieve up-to-date content beyond the knowledge cutoff, or find the latest news and data. Returns structured search results with URLs, snippets, and metadata, fully backward-compatible with the original z-ai-web-dev-sdk `web_search` result schema.
+description: Z.AI-free web search skill that runs entirely on the user's machine. Scrapes DuckDuckGo / Bing / Google HTML directly with automatic engine fallback (DDG -> Bing -> Google). Use whenever the user needs real-time web information, latest news, or content beyond the knowledge cutoff. Same result schema as the original z-ai-web-dev-sdk web_search (url / name / snippet / host_name / rank / date / favicon) plus source_engine, raw_html, score extensions — old code switches over with zero changes. Supports --num, --recency-days, --locale (BCP-47), --json, --output. No API key, no SDK, no cloud hop.
 license: MIT
 ---
 
 # Local Search Skill
 
-A drop-in, **Z.AI-free** replacement for the original `web-search` skill. Instead of calling `z-ai-web-dev-sdk`'s `web_search` cloud function, this skill scrapes the HTML SERPs of public search engines (DuckDuckGo, Bing, Google) directly from the user's machine. No API key, no SDK, no network hop through Z.AI.
+> **Drop-in, Z.AI-free replacement for `z-ai-web-dev-sdk`'s `web_search` function.**
+> Direct HTML scraping of DuckDuckGo / Bing / Google · auto-fallback across engines · 1:1 backward-compatible result schema.
 
-Result schema is **1:1 backward-compatible** with the original `SearchFunctionResultItem` (the same seven fields: `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`), with three optional extension fields added: `source_engine`, `raw_html`, `score`.
+[![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red)](https://clawhub.ai/@Sakurakilove/local-search)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue)](https://github.com/Sakurakilove/local-search)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/Sakurakilove/local-search/blob/main/LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 
-## Installation Path
+Instead of routing every query through Z.AI's cloud function, this skill calls the public search engines directly from your machine. **No API key, no SDK, no network hop through Z.AI.** If one engine is rate-limiting you, the orchestrator silently falls through to the next — so the call usually succeeds on the first try, even from datacenter IPs where Google is blocked.
+
+Result schema is **1:1 backward-compatible** with the original `SearchFunctionResultItem` (the same seven fields: `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`), with three optional extension fields added: `source_engine`, `raw_html`, `score`. Existing consumer code switches over with **zero changes**.
+
+## ✨ Highlights
+
+- **Zero Z.AI dependency** — no `z-ai-web-dev-sdk` import anywhere in this package.
+- **Three engines, automatic fallback** — DuckDuckGo → Bing → Google when `engine: "auto"` (default).
+- **Locale-aware** — `--locale en-US` / `zh-CN` / `ja-JP` / any BCP-47 tag. Critical for non-US IPs where Bing otherwise serves localized results even for English queries.
+- **Recency filter** — `--recency-days 7` restricts to past-week results. DDG supports exact N days; Bing/Google use day/week/month buckets.
+- **Same result schema** — drop-in for any code that consumed `zai.functions.invoke("web_search", ...)`.
+- **CLI + SDK** — use `tsx bin/web-search.ts <query>` for one-offs, or `import { search } from "local-search"` in code.
+- **Pure TypeScript ESM** — runs on Node 18+ via `tsx`, or zero-config via `bun`.
+
+## 🚀 Quick Start
+
+```bash
+# 1. Install (one runtime dep: cheerio)
+cd skills/local-search && npm install
+
+# 2. Search (auto-fallback across DDG → Bing → Google)
+tsx bin/web-search.ts "artificial intelligence"
+
+# 3. Pin a specific engine + locale
+tsx bin/web-search.ts "machine learning" --engine bing --locale en-US --num 5
+
+# 4. Recent news as JSON
+tsx bin/web-search.ts "AI breakthroughs" --recency-days 7 --json -o ai_news.json
+```
+
+Programmatic use:
+
+```typescript
+import { search } from "local-search";
+
+const outcome = await search("What is the capital of France?", { num: 5 });
+if (outcome.success) {
+  console.log(`Answered by ${outcome.engine} in ${outcome.elapsedMs}ms`);
+  outcome.results.forEach(r => console.log(`- ${r.name}\n  ${r.url}`));
+}
+```
+
+## 🎯 When to Use This Skill
+
+Use `local-search` whenever the user needs information that lives on the public web — beyond what's in the model's training data:
+
+- **Real-time information**: current news, stock prices, weather, sports scores
+- **Latest documentation**: framework release notes, API changes, recently published papers
+- **Fact-checking**: verify a claim against live web sources
+- **Research**: gather multiple sources on a topic, compare perspectives
+- **Content discovery**: find tutorials, blog posts, recent talks
+- **Competitive / market analysis**: competitor announcements, industry trends
+- **Academic lookup**: find papers, citations, author pages
+
+## 🔄 Engine Comparison
+
+| Engine | Endpoint | API key | Residential IP | Datacenter IP | Recency |
+|---|---|---|---|---|---|
+| **DuckDuckGo** | `html.duckduckgo.com/html/` (GET) | none | ✅ high | ⚠️ rate-limits under load | `df=d<N>` (exact days) |
+| **Bing** | `www.bing.com/search` | none | ✅ high | ✅ high | `freshness=d1\|w1\|m1` (bucketed) |
+| **Google** | `www.google.com/search` | none | ⚠️ medium | ❌ low (enablejs wall) | `tbs=qdr:d\|w\|m\|y` (bucketed) |
+
+`engine: "auto"` tries them in order **DuckDuckGo → Bing → Google**, returning the first non-empty result set. From a datacenter IP the effective chain is DDG → Bing (Google is usually blocked); from a residential IP all three are viable. Edit `AUTO_ENGINE_ORDER` in `src/engines/index.ts` to change priority.
+
+## 📦 Installation Path
 
 **Recommended Location**: `{project_path}/skills/local-search`
 

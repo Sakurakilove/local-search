@@ -1,6 +1,6 @@
 {
   "name": "local-search",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Web search skill that runs entirely on the user's machine. Replaces z-ai-web-dev-sdk's web_search with DuckDuckGo / Bing / Google HTML scraping. No API key, no cloud dependency.",
   "license": "MIT",
   "type": "module",

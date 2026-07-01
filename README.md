@@ -1,5 +1,13 @@
 # local-search
 
+[![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6eiIvPjwvc3ZnPg==)](https://clawhub.ai/@Sakurakilove/local-search)
+[![Version](https://img.shields.io/badge/version-1.1.1-blue)](https://clawhub.ai/@Sakurakilove/local-search)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg?logo=typescript)](https://www.typescriptlang.org/)
+[![GitHub stars](https://img.shields.io/github/stars/Sakurakilove/local-search?style=social)](https://github.com/Sakurakilove/local-search)
+[![GitHub last commit](https://img.shields.io/github/last-commit/Sakurakilove/local-search)](https://github.com/Sakurakilove/local-search/commits/main)
+
 Web search skill that runs entirely on the user's machine — **no Z.AI / cloud SDK dependency**. Drops the original `z-ai-web-dev-sdk` `web_search` function in favor of direct HTML scraping of DuckDuckGo, Bing, and Google, with automatic engine fallback.
 
 Result schema is 1:1 backward-compatible with the original `SearchFunctionResultItem` (same seven fields: `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`), plus three optional extension fields: `source_engine`, `raw_html`, `score`.
