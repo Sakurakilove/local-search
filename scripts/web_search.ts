@@ -5,9 +5,8 @@
  *   tsx scripts/web_search.ts                # default query
  *   tsx scripts/web_search.ts "your query" 5  # custom query + num
  *
- * This is intentionally tiny — it mirrors the role of the original
- * `scripts/web_search.ts` shipped with the z-ai-web-dev-sdk skill, but
- * uses the new local engine backends (no Z.AI dependency).
+ * This script intentionally stays tiny — it's a smoke-test you can
+ * eyeball, not a feature showcase. For the full CLI see `bin/web-search.ts`.
  */
 import { search, type SearchFunctionResultItem } from "../src/index.js";
 

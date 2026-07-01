@@ -2,8 +2,7 @@
 /**
  * Local web-search CLI.
  *
- * Replaces the original `z-ai function -n web_search ...` invocation.
- * Runs entirely on the user's machine; no Z.AI cloud call is made.
+ * Runs entirely on the user's machine; no cloud SDK is involved.
  *
  * Usage:
  *   tsx bin/web-search.ts <query> [options]
@@ -134,7 +133,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   return out;
 }
 
-const HELP = `local-search CLI — web search without Z.AI dependency
+const HELP = `local-search CLI — local web search with automatic engine fallback
 
 Usage:
   tsx bin/web-search.ts <query> [options]

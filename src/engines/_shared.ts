@@ -1,10 +1,9 @@
 /**
  * Shared helpers used by every engine backend.
  *
- * No Z.AI / cloud SDK dependency — only Node's built-in `fetch` (Node 18+)
- * and a couple of small utilities. `cheerio` is loaded lazily so that
- * environments without it still get a clean import graph for the SDK
- * types.
+ * Only Node's built-in `fetch` (Node 18+) and a couple of small utilities.
+ * `cheerio` is loaded lazily so that environments without it still get a
+ * clean import graph for the SDK types.
  */
 import type { SearchFunctionResultItem, SearchEngineId } from "../types.js";
 

@@ -1,18 +1,19 @@
 /**
  * Search result item.
  *
- * Field compatibility:
- *   - The first 7 fields (url, name, snippet, host_name, rank, date, favicon)
- *     are 1:1 compatible with the original z-ai-web-dev-sdk `web_search`
- *     result item, so existing consumer code can switch over with zero changes.
- *   - The remaining fields (source_engine, raw_html, score, query_matched)
- *     are extensions added by this local-search skill and are optional.
+ * The first 7 fields (url, name, snippet, host_name, rank, date, favicon)
+ * form the canonical shape used across web-search skills in the ClawHub
+ * registry — keeping them 1:1 means consumer code written against any
+ * similarly-shaped skill works here without changes.
+ *
+ * The remaining fields (source_engine, raw_html, score, query_matched)
+ * are extensions added by this local-search skill and are optional.
  */
 export interface SearchFunctionResultItem {
-  // ----- Original fields (kept for backward compatibility) -----
+  // ----- Canonical fields -----
   /** Full URL of the result page. */
   url: string;
-  /** Title of the page (a.k.a. `name` in the original SDK). */
+  /** Title of the page. */
   name: string;
   /** Preview text / short description shown by the search engine. */
   snippet: string;
@@ -25,7 +26,7 @@ export interface SearchFunctionResultItem {
   /** Best-effort favicon URL. */
   favicon: string;
 
-  // ----- Extension fields (new in local-search) -----
+  // ----- Extension fields (specific to local-search) -----
   /** Which engine actually produced this hit. */
   source_engine: SearchEngineId;
   /** Raw HTML snippet (optional, useful for re-parsing downstream). */

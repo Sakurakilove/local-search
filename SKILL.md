@@ -1,30 +1,30 @@
 ---
 name: local-search
-description: Z.AI-free web search skill that runs entirely on the user's machine. Scrapes DuckDuckGo / Bing / Google HTML directly with automatic engine fallback (DDG -> Bing -> Google). Use whenever the user needs real-time web information, latest news, or content beyond the knowledge cutoff. Same result schema as the original z-ai-web-dev-sdk web_search (url / name / snippet / host_name / rank / date / favicon) plus source_engine, raw_html, score extensions — old code switches over with zero changes. Supports --num, --recency-days, --locale (BCP-47), --json, --output. No API key, no SDK, no cloud hop.
+description: Local web search skill that runs entirely on the user's machine. Scrapes DuckDuckGo / Bing / Google HTML directly with automatic engine fallback (DDG -> Bing -> Google). Use whenever the user needs real-time web information, latest news, or content beyond the knowledge cutoff. Returns structured results (url / name / snippet / host_name / rank / date / favicon) plus source_engine, raw_html, score extensions. Supports --num, --recency-days, --locale (BCP-47), --json, --output. No API key, no SDK, no cloud hop.
 license: MIT
 ---
 
 # Local Search Skill
 
-> **Drop-in, Z.AI-free replacement for `z-ai-web-dev-sdk`'s `web_search` function.**
-> Direct HTML scraping of DuckDuckGo / Bing / Google · auto-fallback across engines · 1:1 backward-compatible result schema.
+> **Local web search with automatic engine fallback.**
+> Direct HTML scraping of DuckDuckGo / Bing / Google · resilient to rate-limiting · canonical result schema.
 
 [![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red)](https://clawhub.ai/@Sakurakilove/local-search)
-[![Version](https://img.shields.io/badge/version-1.1.1-blue)](https://github.com/Sakurakilove/local-search)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)](https://github.com/Sakurakilove/local-search)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/Sakurakilove/local-search/blob/main/LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 
-Instead of routing every query through Z.AI's cloud function, this skill calls the public search engines directly from your machine. **No API key, no SDK, no network hop through Z.AI.** If one engine is rate-limiting you, the orchestrator silently falls through to the next — so the call usually succeeds on the first try, even from datacenter IPs where Google is blocked.
+This skill calls the public search engines directly from your machine. **No API key, no SDK, no network hop.** If one engine is rate-limiting you, the orchestrator silently falls through to the next — so the call usually succeeds on the first try, even from datacenter IPs where Google is blocked.
 
-Result schema is **1:1 backward-compatible** with the original `SearchFunctionResultItem` (the same seven fields: `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`), with three optional extension fields added: `source_engine`, `raw_html`, `score`. Existing consumer code switches over with **zero changes**.
+Each result is a `SearchFunctionResultItem` with the canonical 7 fields (`url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`) plus three optional extension fields: `source_engine`, `raw_html`, `score`. Consumer code written against any similarly-shaped web-search skill works here without changes.
 
 ## ✨ Highlights
 
-- **Zero Z.AI dependency** — no `z-ai-web-dev-sdk` import anywhere in this package.
+- **Zero cloud SDK dependency** — only `cheerio` (HTML parser) and Node's built-in `fetch`.
 - **Three engines, automatic fallback** — DuckDuckGo → Bing → Google when `engine: "auto"` (default).
 - **Locale-aware** — `--locale en-US` / `zh-CN` / `ja-JP` / any BCP-47 tag. Critical for non-US IPs where Bing otherwise serves localized results even for English queries.
 - **Recency filter** — `--recency-days 7` restricts to past-week results. DDG supports exact N days; Bing/Google use day/week/month buckets.
-- **Same result schema** — drop-in for any code that consumed `zai.functions.invoke("web_search", ...)`.
+- **Canonical result schema** — `url` / `name` / `snippet` / `host_name` / `rank` / `date` / `favicon` fields, identical in shape to other web-search skills in the ClawHub registry.
 - **CLI + SDK** — use `tsx bin/web-search.ts <query>` for one-offs, or `import { search } from "local-search"` in code.
 - **Pure TypeScript ESM** — runs on Node 18+ via `tsx`, or zero-config via `bun`.
 
@@ -99,16 +99,16 @@ npm install            # or: bun install / pnpm install
 
 > The skill is pure TypeScript ESM. You can run it via `tsx` (recommended, dev-friendly) or `bun` (zero-config). A runtime-agnostic `node --experimental-strip-types bin/web-search.ts` also works on Node 22+.
 
-## Why a Local Replacement?
+## Why Local?
 
-| Aspect | Original (`z-ai-web-dev-sdk`) | This skill (`local-search`) |
+| Aspect | Cloud-search skills | This skill (`local-search`) |
 |---|---|---|
-| Search backend | Z.AI cloud `web_search` function | Direct HTTP to DuckDuckGo / Bing / Google |
-| API key / SDK | Required (`z-ai-web-dev-sdk`) | None |
-| Network path | Client → Z.AI → search engine | Client → search engine |
+| Search backend | Cloud function / API | Direct HTTP to DuckDuckGo / Bing / Google |
+| API key / SDK | Required | None |
+| Network path | Client → cloud → search engine | Client → search engine |
 | Failure handling | SDK-dependent | Auto-fallback across 3 engines |
 | Result schema | `SearchFunctionResultItem` (7 fields) | Same 7 fields + 3 optional extension fields |
-| CLI | `z-ai function -n web_search` | `tsx bin/web-search.ts` |
+| CLI | SDK-specific | `tsx bin/web-search.ts` |
 
 ## Architecture
 
@@ -119,13 +119,13 @@ local-search/
 ├── package.json             ← declares the `cheerio` dep
 ├── tsconfig.json
 ├── bin/
-│   └── web-search.ts        ← CLI entry (replaces `z-ai function -n web_search`)
+│   └── web-search.ts        ← CLI entry
 ├── src/
 │   ├── index.ts             ← public SDK exports
 │   ├── search.ts            ← orchestrator with auto-fallback
 │   ├── types.ts             ← SearchFunctionResultItem + options
 │   └── engines/
-│       ├── _shared.ts       ← fetch / parse helpers, no deps on Z.AI
+│       ├── _shared.ts       ← fetch / parse helpers
 │       ├── duckduckgo.ts    ← POST https://html.duckduckgo.com/html/
 │       ├── bing.ts          ← GET https://www.bing.com/search
 │       ├── google.ts        ← GET https://www.google.com/search
@@ -134,7 +134,7 @@ local-search/
     └── web_search.ts        ← quick-start example
 ```
 
-No file in this package imports `z-ai-web-dev-sdk`. Confirmed via `grep -r "z-ai-web-dev-sdk" .` returning zero hits (except this doc, for context).
+The only runtime dependency is `cheerio` (HTML parser), declared in `package.json`. Node 18+'s built-in `fetch` covers the network layer — no other SDK is imported anywhere in this package.
 
 ## CLI Usage
 
@@ -211,7 +211,7 @@ Each result item is a `SearchFunctionResultItem`:
 
 ```typescript
 interface SearchFunctionResultItem {
-  // ----- Original fields (1:1 with z-ai-web-dev-sdk) -----
+  // ----- Canonical fields (shared shape across ClawHub web-search skills) -----
   url: string;          // Full URL of the result
   name: string;         // Title of the page
   snippet: string;      // Preview text / description
@@ -348,25 +348,6 @@ It returns the first engine that yields ≥ 1 result. If all three fail, the out
 
 The order is defined in `src/engines/index.ts` (`AUTO_ENGINE_ORDER`); edit that array if you want a different priority.
 
-## Migration from `z-ai-web-dev-sdk`
-
-If you have existing code that calls `zai.functions.invoke("web_search", { query, num })`, here's the swap:
-
-```typescript
-// BEFORE — depends on z-ai-web-dev-sdk
-import ZAI from "z-ai-web-dev-sdk";
-const zai = await ZAI.create();
-const results = await zai.functions.invoke("web_search", { query, num: 10 });
-
-// AFTER — local-search, no Z.AI dependency
-import { search } from "local-search";
-const outcome = await search(query, { num: 10 });
-if (!outcome.success) throw new Error(outcome.error);
-const results = outcome.results;
-```
-
-The shape of each `results[i]` is identical: same `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon` fields. The only addition is `source_engine` (and optional `raw_html` / `score`), which existing code can simply ignore.
-
 ## Common Use Cases
 
 1. **Real-time Information Retrieval**: Current news, stock prices, weather
@@ -418,7 +399,7 @@ The shape of each `results[i]` is identical: same `url`, `name`, `snippet`, `hos
 1. **Input Validation**: Sanitize user search queries before passing them in (the engines handle URL encoding, but your downstream code should still validate).
 2. **Rate Limiting**: The skill itself does not rate-limit. If you wrap it in a service, add a rate limiter at that layer.
 3. **No API Key Storage**: There are no API keys to leak. The only secret-like thing is your IP address.
-4. **Privacy**: Your queries go directly to the chosen search engine, not through Z.AI. Whether that's more or less private depends on your threat model.
+4. **Privacy**: Your queries go directly to the chosen search engine. Whether that's more or less private than routing through a cloud function depends on your threat model.
 5. **URL Validation**: Validate `result.url` before redirecting end users (the skill returns the engine's raw URL; some engines occasionally surface tracking redirects).
 6. **User-Agent Spoofing**: The skill sends a Chrome desktop User-Agent by default. Override with `userAgent` if your use case requires honesty.
 
@@ -434,12 +415,12 @@ tsx scripts/web_search.ts
 tsx scripts/web_search.ts "your query" 5
 ```
 
-It mirrors the role of the original `scripts/web_search.ts` shipped with the `z-ai-web-dev-sdk` skill, but uses the new local backends instead.
+It's intentionally tiny — a smoke-test you can eyeball, not a feature showcase.
 
 ## Remember
 
-- **Zero Z.AI dependency** — no `z-ai-web-dev-sdk` import anywhere in this package.
-- **Same result schema** as the original `web_search`, plus three optional extension fields.
+- **Zero cloud SDK dependency** — only `cheerio` and Node's built-in `fetch`.
+- **Canonical result schema** — `url` / `name` / `snippet` / `host_name` / `rank` / `date` / `favicon` fields, plus three optional extension fields (`source_engine`, `raw_html`, `score`).
 - **Auto-fallback across DuckDuckGo → Bing → Google** when `engine: "auto"` (the default).
 - **CLI**: `tsx bin/web-search.ts <query> [--num N] [--engine auto|duckduckgo|bing|google] [--recency-days N] [--json] [-o file.json]`.
 - **SDK**: `import { search, searchOrThrow } from "local-search"`.

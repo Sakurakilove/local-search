@@ -22,6 +22,7 @@ SOFTWARE.
 
 ---
 
-Note: This skill is a derivative work of the original z-ai-web-dev-sdk
-"web-search" skill. The original MIT license is preserved above. All
-Z.AI-specific code and dependencies have been removed.
+Acknowledgements: the canonical `SearchFunctionResultItem` shape
+(url / name / snippet / host_name / rank / date / favicon) was inspired
+by an earlier MIT-licensed ClawHub skill of the same name. All engine
+backend code in this package is original.

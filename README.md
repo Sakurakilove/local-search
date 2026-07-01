@@ -1,16 +1,16 @@
 # local-search
 
 [![ClawHub](https://img.shields.io/badge/ClawHub-%40Sakurakilove%2Flocal--search-red?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6eiIvPjwvc3ZnPg==)](https://clawhub.ai/@Sakurakilove/local-search)
-[![Version](https://img.shields.io/badge/version-1.1.1-blue)](https://clawhub.ai/@Sakurakilove/local-search)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue)](https://github.com/Sakurakilove/local-search/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4-blue.svg?logo=typescript)](https://www.typescriptlang.org/)
 [![GitHub stars](https://img.shields.io/github/stars/Sakurakilove/local-search?style=social)](https://github.com/Sakurakilove/local-search)
 [![GitHub last commit](https://img.shields.io/github/last-commit/Sakurakilove/local-search)](https://github.com/Sakurakilove/local-search/commits/main)
 
-Web search skill that runs entirely on the user's machine — **no Z.AI / cloud SDK dependency**. Drops the original `z-ai-web-dev-sdk` `web_search` function in favor of direct HTML scraping of DuckDuckGo, Bing, and Google, with automatic engine fallback.
+Web search skill that runs entirely on the user's machine. Scrapes the public SERPs of **DuckDuckGo / Bing / Google** directly over HTTP, with automatic engine fallback when one backend is rate-limiting or unreachable.
 
-Result schema is 1:1 backward-compatible with the original `SearchFunctionResultItem` (same seven fields: `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`), plus three optional extension fields: `source_engine`, `raw_html`, `score`.
+Each result is a `SearchFunctionResultItem` with `url`, `name`, `snippet`, `host_name`, `rank`, `date`, `favicon`, plus three extension fields: `source_engine`, `raw_html`, `score`.
 
 ## Quick Start
 
@@ -29,13 +29,11 @@ tsx bin/web-search.ts "AI news" --recency-days 1 --json -o ai_news.json
 
 ## Why?
 
-The original `web-search` skill routed every query through Z.AI's cloud function. That's fine when you have a key and don't mind the extra hop, but it's:
-
-- **Not portable** — won't run on machines without the Z.AI SDK.
-- **Not free** — every search costs Z.AI quota.
-- **Not transparent** — you can't see which underlying engine answered.
-
-This skill replaces that with three direct HTTP backends and a fallback chain. The result shape is unchanged, so existing consumer code can switch with a one-line import.
+- **No API key** — calls the public search engines directly.
+- **No network hop** — your machine → engine, nothing in between.
+- **Transparent** — every result carries a `source_engine` field so you can see who answered.
+- **Resilient** — if DDG is rate-limiting you, the orchestrator silently falls through to Bing, then Google.
+- **Locale-aware** — `--locale en-US` / `zh-CN` / `ja-JP` / any BCP-47 tag. Critical for non-US IPs where Bing otherwise serves localized results even for English queries.
 
 ## Files
 
@@ -86,6 +84,7 @@ Options:
   --num, -n <N>          Number of results (default: 10)
   --engine, -e <id>      duckduckgo | bing | google | auto  (default: auto)
   --recency-days, -r <N> Restrict to results from last N days
+  --locale <BCP-47>      Result locale, e.g. en-US (default), zh-CN, ja-JP
   --timeout <ms>         Per-engine timeout (default: 8000)
   --json                  Emit JSON
   --output, -o <path>     Write JSON to file
@@ -115,6 +114,10 @@ tsx scripts/test.ts
 
 Expected output: 8 tests pass. If your IP is being rate-limited by DDG, the test still passes because auto-mode falls through to Bing — Test 6 in the suite explicitly verifies this fallback path.
 
+## Acknowledgements
+
+The result schema and original skill structure were inspired by an earlier ClawHub skill of the same name. That project's MIT-licensed design shaped the `SearchFunctionResultItem` shape used here; all backend code is original.
+
 ## License
 
-MIT. Derived from the original `z-ai-web-dev-sdk` "web-search" skill; all Z.AI-specific code and dependencies have been removed.
+MIT. See [`LICENSE.txt`](./LICENSE.txt).
