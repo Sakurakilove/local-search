@@ -18,7 +18,9 @@ import {
   DEFAULT_USER_AGENT,
   ENGINE_IDS,
   detectLocale,
+  filterNewsHomepages,
   mergeAndRankResults,
+  rewriteQuery,
   resultSetQuality,
 } from "./engines/_shared.js";
 import {
@@ -115,10 +117,20 @@ export async function search(
     };
   }
 
+  // Query rewriting: add disambiguation context for queries that confuse
+  // search engines (e.g., "Rust" alone → "Rust programming"). The
+  // rewriter is conservative — see its docstring for the rules.
+  const rewrittenQuery = rewriteQuery(query, { recency_days: resolved.recency_days });
+  const queryWasRewritten = rewrittenQuery !== query;
+
+  // Locale is auto-detected from the ORIGINAL query (the user's intent),
+  // not the rewritten one. CJK detection works the same on both.
   const locale = resolved.localeExplicit ?? detectLocale(query);
 
+  // The engine call uses the rewritten query. Quality scoring uses the
+  // original query (so we measure against user intent, not our own rewrite).
   const callEngine = (id: SearchEngineId) =>
-    ENGINES[id].search(query, {
+    ENGINES[id].search(rewrittenQuery, {
       num: resolved.num,
       recency_days: resolved.recency_days,
       timeoutMs: resolved.timeoutMs,
@@ -127,12 +139,25 @@ export async function search(
       fetchImpl: resolved.fetchImpl as typeof fetch,
     });
 
+  // Post-process engine results: drop news-site homepages if recency_days
+  // is set (user wants articles, not homepages).
+  const postFilter = (results: SearchFunctionResultItem[]): SearchFunctionResultItem[] => {
+    if (resolved.recency_days && resolved.recency_days > 0) {
+      return filterNewsHomepages(results);
+    }
+    return results;
+  };
+
   // ---- Explicit single-engine mode ----
   if (resolved.engine !== "auto") {
     try {
-      const results = await callEngine(resolved.engine);
+      const rawResults = await callEngine(resolved.engine);
+      const results = postFilter(rawResults);
       const quality = resultSetQuality(results, query);
       const warnings: string[] = [];
+      if (queryWasRewritten) {
+        warnings.push(`Query rewritten: "${query}" → "${rewrittenQuery}"`);
+      }
       if (quality < AUTO_QUALITY_THRESHOLD) {
         warnings.push(
           `${resolved.engine} returned low-relevance results (quality ${quality}/100). ` +
@@ -182,14 +207,19 @@ export async function search(
   for (const id of AUTO_ENGINE_ORDER) {
     tried.push(id);
     try {
-      const results = await callEngine(id);
+      const rawResults = await callEngine(id);
+      const results = postFilter(rawResults);
       if (results.length === 0) {
-        errors.push({ engine: id, error: new Error("Engine returned 0 results") });
+        errors.push({ engine: id, error: new Error("Engine returned 0 results (after post-filter)") });
         continue;
       }
       const quality = resultSetQuality(results, query);
       // Accept immediately if quality clears the gate.
       if (quality >= AUTO_QUALITY_THRESHOLD && collected.length === 0) {
+        const acceptWarnings: string[] = [];
+        if (queryWasRewritten) {
+          acceptWarnings.push(`Query rewritten: "${query}" → "${rewrittenQuery}"`);
+        }
         return {
           success: true,
           results,
@@ -198,7 +228,7 @@ export async function search(
           elapsedMs: Date.now() - startedAt,
           locale,
           quality,
-          warnings: [],
+          warnings: acceptWarnings,
         };
       }
       // Otherwise, remember and keep looking.
@@ -224,6 +254,9 @@ export async function search(
       // Use the merged set if it's better than the best single-engine set.
       const bestSingle = collected.reduce((a, b) => (b.quality > a.quality ? b : a));
       if (mergedQuality >= bestSingle.quality) {
+        if (queryWasRewritten) {
+          warnings.push(`Query rewritten: "${query}" → "${rewrittenQuery}"`);
+        }
         warnings.push(
           `Single-engine quality was low (best ${bestSingle.quality}/100 from ${bestSingle.engine}). ` +
           `Merged ${collected.length} engines (${collected.map(c => c.engine).join(" + ")}) → quality ${mergedQuality}/100.`
@@ -243,6 +276,9 @@ export async function search(
 
     // Merge didn't help (or only one engine returned). Return the best single.
     const best = collected.reduce((a, b) => (b.quality > a.quality ? b : a));
+    if (queryWasRewritten) {
+      warnings.push(`Query rewritten: "${query}" → "${rewrittenQuery}"`);
+    }
     warnings.push(
       `No engine cleared the quality gate (threshold ${AUTO_QUALITY_THRESHOLD}). ` +
       `Returning best result set from ${best.engine} (quality ${best.quality}/100). ` +

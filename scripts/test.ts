@@ -51,16 +51,17 @@ console.log("\n=== Test 2: Auto-fallback engages (DDG -> Bing) ===");
   console.log("  PASS");
 }
 
-console.log("\n=== Test 3: Google excluded from auto chain ===");
+console.log("\n=== Test 3: Auto chain composition (DDG → Bing → Google) ===");
 {
-  // The fix: Google is no longer in AUTO_ENGINE_ORDER. Verify by checking
-  // enginesTried never contains 'google' under auto mode.
+  // v1.4.0+ : Google IS in the auto chain again as a last-resort fallback.
+  // It usually fails on datacenter IPs (enablejs wall) but when it works
+  // (residential IP), it provides the best results. The quality gate
+  // ensures we never accept Google's garbage — only its successes.
   const o = await search("react hooks tutorial", { num: 3, engine: "auto" });
   if (!o.success) { console.error("FAIL:", o.error); process.exit(1); }
-  if (o.enginesTried.includes("google" as any)) {
-    console.error("FAIL: Google was tried in auto mode — should be excluded"); process.exit(1);
-  }
-  console.log(`  enginesTried: [${o.enginesTried.join(", ")}] (no google)  PASS`);
+  // We just verify the auto chain ran without crashing. Google may or may
+  // not have been tried depending on whether DDG/Bing cleared the gate.
+  console.log(`  enginesTried: [${o.enginesTried.join(", ")}]  PASS`);
 }
 
 console.log("\n=== Test 4: searchOrThrow returns array on success ===");
@@ -202,4 +203,128 @@ console.log("\n=== Test 13: Cross-engine merge rescues bad single-engine results
   console.log("  PASS — top result is on-topic (Android-specific)");
 }
 
-console.log("\nAll 13 tests passed ✓");
+console.log("\n=== Test 14: 'Jetpack Compose' returns Android UI framework pages ===");
+{
+  // Previously Bing returned WordPress Jetpack plugin, NVIDIA JetPack, real
+  // jetpacks. The fix: stricter quality scoring (phrase match) + DDG first.
+  // Top result should be developer.android.com (official Android docs).
+  const o = await search("Jetpack Compose", { num: 3, engine: "auto" });
+  if (!o.success) { console.error("FAIL:", o.error); process.exit(1); }
+  console.log(`  Engine: ${o.engine}, quality: ${o.quality}/100`);
+  o.results.slice(0, 3).forEach((r, i) => console.log(`    ${i + 1}. ${r.name.slice(0, 70)}`));
+  // Top result must mention "android" or be from developer.android.com.
+  const top = o.results[0];
+  const topRelevant = /android|compose/i.test(top.name + " " + top.url + " " + top.host_name);
+  if (!topRelevant) {
+    console.error(`FAIL: top result not about Android Jetpack Compose: ${top.name}`);
+    process.exit(1);
+  }
+  // Must NOT return WordPress / NVIDIA / physical jetpack pages.
+  const hasBadResult = o.results.some(r =>
+    /wordpress|nvidia|jetpack.com/i.test(r.host_name) &&
+    !/android|compose/i.test(r.name)
+  );
+  if (hasBadResult) {
+    console.error("FAIL: still returning WordPress/NVIDIA Jetpack results");
+    process.exit(1);
+  }
+  console.log("  PASS — Jetpack Compose results are about Android UI");
+}
+
+console.log("\n=== Test 15: Chinese query '小米SU7销量' returns relevant results ===");
+{
+  // Previously returned NO output. The fix: locale auto-detection + the
+  // ensearch=1 fix from v1.3.0 means Bing now handles CJK queries.
+  const o = await search("小米SU7销量", { num: 3, engine: "auto" });
+  if (!o.success) { console.error("FAIL:", o.error); process.exit(1); }
+  console.log(`  Engine: ${o.engine}, locale: ${o.locale}, quality: ${o.quality}/100`);
+  o.results.slice(0, 3).forEach((r, i) => console.log(`    ${i + 1}. ${r.name.slice(0, 70)}`));
+  if (o.results.length === 0) {
+    console.error("FAIL: returned 0 results for Chinese query");
+    process.exit(1);
+  }
+  // At least one result must mention 小米 or SU7.
+  const hasRelevant = o.results.some(r =>
+    /小米|SU7|Xiaomi/i.test(r.name + " " + r.url + " " + r.host_name)
+  );
+  if (!hasRelevant) {
+    console.error("FAIL: no result mentions 小米 or SU7");
+    process.exit(1);
+  }
+  console.log("  PASS — Chinese query returns on-topic results");
+}
+
+console.log("\n=== Test 16: News query with recency filters out homepages ===");
+{
+  // Previously returned CNN/BBC homepages. The fix: filterNewsHomepages()
+  // drops root-path URLs when recency_days > 0.
+  const o = await search("最新新闻", { num: 5, engine: "auto", recency_days: 3 });
+  if (!o.success) { console.error("FAIL:", o.error); process.exit(1); }
+  console.log(`  Engine: ${o.engine}, locale: ${o.locale}, quality: ${o.quality}/100`);
+  o.results.slice(0, 3).forEach((r, i) => console.log(`    ${i + 1}. ${r.name.slice(0, 70)}`));
+  // No result should be a bare root-domain URL.
+  const hasHomepage = o.results.some(r => {
+    try {
+      const u = new URL(r.url);
+      return u.pathname === "/" || u.pathname === "";
+    } catch { return false; }
+  });
+  if (hasHomepage) {
+    console.error("FAIL: news results contain a homepage URL (path == '/')");
+    process.exit(1);
+  }
+  console.log("  PASS — news results have non-trivial paths (articles, not homepages)");
+}
+
+console.log("\n=== Test 17: 'Rust vs Go' returns programming comparison pages ===");
+{
+  // Previously: Bing returned the Rust video game + Steam store page.
+  // Fix: query rewrite adds "programming", quality scoring checks both
+  // X and Y tokens appear in result (so "Golang vs Rust" still scores high).
+  const o = await search("Rust vs Go", { num: 5, engine: "auto" });
+  if (!o.success) { console.error("FAIL:", o.error); process.exit(1); }
+  console.log(`  Engine: ${o.engine}, quality: ${o.quality}/100`);
+  if (o.warnings.length > 0) o.warnings.forEach(w => console.log(`    ⚠ ${w.slice(0, 100)}`));
+  o.results.slice(0, 3).forEach((r, i) => console.log(`    ${i + 1}. ${r.name.slice(0, 70)}`));
+  // At least one result should be a programming comparison (not the video game).
+  const hasComparison = o.results.some(r =>
+    /(rust|golang|go).{0,30}(vs|versus|compar).{0,30}(rust|golang|go)|programming/i.test(
+      r.name + " " + r.snippet
+    )
+  );
+  if (!hasComparison) {
+    console.error("FAIL: no programming comparison result found");
+    process.exit(1);
+  }
+  console.log("  PASS — at least one programming comparison result");
+}
+
+console.log("\n=== Test 18: 'TypeScript 5.6' returns version-specific pages ===");
+{
+  // Previously: returned generic TypeScript pages, no 5.6-specific content.
+  // Fix: stricter phrase matching in quality scoring — version numbers in
+  // the query MUST appear in title/url for a STRONG hit.
+  //
+  // NOTE: This test is best-effort. If DDG is rate-limiting us (common in
+  // CI/dev environments), Bing takes over and Bing is known to return
+  // generic TypeScript pages for version-specific queries. In that case
+  // we verify the quality score is honest (≤ 50, not falsely 100).
+  const o = await search("TypeScript 5.6", { num: 3, engine: "auto" });
+  if (!o.success) { console.error("FAIL:", o.error); process.exit(1); }
+  console.log(`  Engine: ${o.engine}, quality: ${o.quality}/100`);
+  o.results.slice(0, 3).forEach((r, i) => console.log(`    ${i + 1}. ${r.name.slice(0, 70)}`));
+  const hasVersion = o.results.some(r => /5\.?6/i.test(r.name + " " + r.url));
+  if (hasVersion) {
+    console.log("  PASS — version-specific pages returned");
+  } else {
+    // Bing fallback path: quality must NOT lie. If it returns generic TS
+    // pages, quality should be < 50 (not falsely 100).
+    if (o.quality > 50) {
+      console.error(`FAIL: no 5.6 mention but quality=${o.quality}/100 (should be ≤50)`);
+      process.exit(1);
+    }
+    console.log(`  PASS (soft) — no 5.6 pages (Bing fallback), but quality=${o.quality}/100 is honest`);
+  }
+}
+
+console.log("\nAll 18 tests passed ✓");

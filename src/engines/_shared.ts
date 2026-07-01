@@ -226,23 +226,34 @@ export function isLikelyIrrelevant(item: SearchFunctionResultItem, query: string
 /**
  * Heuristic relevance scoring for a result set against the original query.
  *
- * Returns a quality score in [0, 100]:
- *   - 100  = every result mentions at least one query token in title/url/snippet
- *   - 0    = no result mentions any query token
- *   - in between = proportional hit rate
+ * Returns a quality score in [0, 100] representing how on-topic the result
+ * set is. The scoring is intentionally stricter than naive "any token hit"
+ * — that approach gave misleadingly high scores to results that mentioned
+ * *one* query word in an off-topic context (e.g., "Jetpack Compose" →
+ * "WordPress Jetpack plugin" scored 90/100 because "jetpack" matched).
+ *
+ * Scoring rules:
+ *
+ * For each result, compute a per-result relevance verdict:
+ *   - STRONG hit (3 pts): the query appears as a contiguous phrase in
+ *     title/url/host (case-insensitive). E.g., query "Jetpack Compose"
+ *     matches title "Jetpack Compose for Android developers".
+ *   - PARTIAL hit (1 pt): ≥ 50% of the query's distinctive tokens appear
+ *     in the combined title+url+host (not just one token). E.g., for
+ *     "Rust vs Go programming", tokens {rust, programming} appearing in
+ *     "Rust programming language" counts; "rust game on Steam" doesn't.
+ *   - MISS (0 pts): neither of the above.
+ *
+ * Then: quality = round(STRONG_count × 100 / total)
+ *   If no STRONG hits, fall back to round(PARTIAL_count × 40 / total).
+ *   This means a result set with no phrase matches but lots of partial
+ *   token hits caps at 40/100 — below the AUTO_QUALITY_THRESHOLD of 30
+ *   only if partials are < 75% of results, which is the right call.
  *
  * Tokenization:
- *   - For CJK queries: each CJK ideograph is a token (whole-word matching
- *     doesn't work for unspaced languages). A "hit" = at least one ideograph
- *     appears in the result's title/url/host.
- *   - For Latin queries: split on non-word chars, drop stopwords and tokens
- *     shorter than 3 chars. A "hit" = any token appears as a substring
- *     (case-insensitive) in title/url/host/snippet.
- *
- * This is the signal the auto-fallback chain uses to decide whether to
- * try the next engine. The threshold for "acceptable" is 30 (i.e., at
- * least ~30% of results mention a query token); below that we keep
- * looking for a better engine.
+ *   - CJK: each ideograph is a token. Phrase match = first 3 CJK chars
+ *     appear contiguously in title/url/host.
+ *   - Latin: split on non-word, drop stopwords + tokens < 3 chars.
  */
 export function resultSetQuality(
   results: SearchFunctionResultItem[],
@@ -253,7 +264,9 @@ export function resultSetQuality(
   if (!q) return 0;
 
   const isCJK = /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(q);
+  const qLower = q.toLowerCase();
 
+  // Build the distinctive-token list for PARTIAL-hit scoring.
   let tokens: string[];
   if (isCJK) {
     tokens = [...q].filter(c =>
@@ -265,24 +278,117 @@ export function resultSetQuality(
       "the", "a", "an", "is", "are", "of", "to", "in", "on", "for",
       "and", "or", "how", "what", "when", "where", "why", "with",
       "from", "by", "at", "be", "this", "that", "these", "those",
+      "vs", "versus", "latest", "new", "best", "top",
     ]);
-    tokens = q.toLowerCase()
+    tokens = qLower
       .split(/[^a-z0-9]+/i)
-      .filter(t => t.length >= 3 && !stop.has(t.toLowerCase()));
+      .filter(t => t.length >= 3 && !stop.has(t));
     tokens = [...new Set(tokens)];
   }
 
-  if (tokens.length === 0) return 75;
-
-  let hitCount = 0;
-  for (const r of results) {
-    const hay = isCJK
-      ? `${r.name} ${r.url} ${r.host_name}`.toLowerCase()
-      : `${r.name} ${r.url} ${r.host_name} ${r.snippet}`.toLowerCase();
-    const hit = tokens.some(t => hay.includes(t.toLowerCase()));
-    if (hit) hitCount++;
+  if (tokens.length === 0) {
+    // No scorable tokens (e.g., query was all stopwords). Be optimistic.
+    return 75;
   }
-  return Math.round((hitCount / results.length) * 100);
+
+  // For phrase matching: take the longest 1-3 token run from the query.
+  // For "Jetpack Compose" → phrase = "jetpack compose".
+  // For "Rust vs Go programming" → phrase = "rust" (vs/Go filtered out)
+  //   → in that case, fall back to "rust programming" as a multi-token
+  //   partial-match requirement.
+  const phrase = isCJK
+    ? tokens.slice(0, 3).join("")
+    : qLower.replace(/\s+/g, " ").trim();
+
+  let strongHits = 0;
+  let partialHits = 0;
+
+  for (const r of results) {
+    const titleUrlHost = `${r.name} ${r.url} ${r.host_name}`.toLowerCase();
+    const titleUrlHostSnippet = `${titleUrlHost} ${r.snippet}`.toLowerCase();
+
+    // STRONG: phrase appears contiguously.
+    // For CJK, phrase is a char run; for Latin, it's the original query
+    // lowercased (so multi-word phrases like "jetpack compose" match).
+    let phraseHit = false;
+    if (isCJK) {
+      phraseHit = titleUrlHost.includes(phrase);
+    } else {
+      // For Latin queries, try the full query string first (most strict),
+      // then fall back to the longest contiguous token run.
+      if (titleUrlHost.includes(qLower)) {
+        phraseHit = true;
+      } else {
+        // Find longest contiguous alphabetic run in the query.
+        const runs = qLower.match(/[a-z][a-z0-9]+(?:\s+[a-z][a-z0-9]+)*/g) || [];
+        const longestRun = runs.sort((a, b) => b.length - a.length)[0];
+        if (longestRun && longestRun.length >= 4 && titleUrlHost.includes(longestRun)) {
+          phraseHit = true;
+        }
+      }
+    }
+    // VERSION-SENSITIVE QUERIES: if the query contains a version number
+    // (like "TypeScript 5.6" or "Python 3.12"), the version number MUST
+    // appear in title/url/host for a STRONG hit. Otherwise we'd score
+    // typescriptlang.org homepage as a strong match for "TypeScript 5.6"
+    // just because "typescript" matches.
+    const versionInQuery = qLower.match(/\b\d+(?:\.\d+)+\b/);
+    if (phraseHit && versionInQuery) {
+      if (!titleUrlHost.includes(versionInQuery[0]) &&
+          !titleUrlHost.includes(versionInQuery[0].replace(/\./g, "-"))) {
+        phraseHit = false;  // demote to partial
+      }
+    }
+    // SPECIAL CASE: "X vs Y" comparison queries. The original query has
+    // "vs"/"versus" in it, so we check if both X and Y appear in the
+    // title/url/host (engines often reorder them as "Y vs X"). This is
+    // a STRONG signal because comparison pages almost always mention both.
+    if (!phraseHit && /\bvs\.?\b/i.test(q)) {
+      // Strip "vs/versus" and any rewriter-added "programming/comparison"
+      // to get the raw X Y tokens.
+      const cleaned = qLower
+        .replace(/\b(vs\.?|versus|programming|comparison|language|languages)\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const parts = cleaned.split(" ").filter(t => t.length >= 2);
+      if (parts.length >= 2) {
+        // Need at least 2 of the original X/Y tokens to both appear.
+        // Use the first and last non-stopword token as X and Y.
+        const x = parts[0];
+        const y = parts[parts.length - 1];
+        if (titleUrlHost.includes(x) && titleUrlHost.includes(y)) {
+          phraseHit = true;
+        }
+        // Also accept common aliases (golang for go, rust-lang for rust, etc.)
+        const aliases: Record<string, string[]> = {
+          go: ["golang", "go-lang"],
+          rust: ["rust-lang"],
+          csharp: ["c#", "c sharp"],
+          cpp: ["c++"],
+        };
+        const xAlts = aliases[x] || [];
+        const yAlts = aliases[y] || [];
+        const xHit = titleUrlHost.includes(x) || xAlts.some(a => titleUrlHost.includes(a));
+        const yHit = titleUrlHost.includes(y) || yAlts.some(a => titleUrlHost.includes(a));
+        if (xHit && yHit) phraseHit = true;
+      }
+    }
+    if (phraseHit) {
+      strongHits++;
+      continue;
+    }
+
+    // PARTIAL: ≥ 50% of distinctive tokens appear (anywhere, including snippet).
+    const hitCount = tokens.filter(t => titleUrlHostSnippet.includes(t)).length;
+    if (hitCount >= Math.ceil(tokens.length * 0.5)) {
+      partialHits++;
+    }
+  }
+
+  // Strong hits dominate; partials are a weaker fallback.
+  const strongScore = (strongHits / results.length) * 100;
+  const partialScore = (partialHits / results.length) * 40;
+  return Math.round(Math.max(strongScore, partialScore));
 }
 
 /**
@@ -412,3 +518,168 @@ export const ENGINE_IDS: ReadonlyArray<SearchEngineId> = [
   "bing",
   "google",
 ];
+
+/**
+ * Query rewriting: improve search quality by adding disambiguation context
+ * to queries that are known to confuse search engines.
+ *
+ * The rewriter is INTENTIONALLY CONSERVATIVE — it only fires on patterns
+ * with a clear, high-confidence disambiguation benefit. Over-eager rewriting
+ * (e.g., appending "programming" to any query containing "rust") damages
+ * non-programming queries like "Rust prevention tips" or "Go travel guide".
+ *
+ * Cases handled:
+ *
+ * 1. Single-token programming language queries:
+ *    "Rust" → "Rust programming"
+ *    "Go"   → "Go programming language"
+ *    "Swift" → "Swift programming"
+ *    ONLY fires when the query is exactly 1 distinctive token (after
+ *    dropping stopwords and short tokens). Multi-token queries are left
+ *    alone — they already have context.
+ *
+ * 2. Comparison queries ("X vs Y"):
+ *    "Rust vs Go" → "Rust vs Go programming comparison"
+ *    "React vs Vue" → "React vs Vue comparison"
+ *    The "vs" token is preserved (engines honor it). We add a domain
+ *    qualifier only if either side is an ambiguous lang name; otherwise
+ *    we just add "comparison" to bias toward compare-style pages.
+ *
+ * 3. News queries with recency_days:
+ *    "AI news" + recency=7 → "AI news today"
+ *    "最新新闻" + recency → unchanged (Chinese news queries already
+ *    imply recency; the news-mode URL filter handles homepage spam).
+ *
+ * 4. Queries that already contain programming context:
+ *    "Rust async runtime", "Go http server", "Swift generics" — left alone.
+ *
+ * Returns the (possibly rewritten) query. Always returns a string.
+ */
+export function rewriteQuery(
+  query: string,
+  opts: { recency_days?: number } = {}
+): string {
+  const q = query.trim();
+  if (!q) return q;
+
+  const isCJK = /[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]/.test(q);
+
+  // --- 1. Single-token programming language disambiguation ---
+  // ONLY for short English queries. CJK queries skip this entirely.
+  if (!isCJK) {
+    const ambiguousLangs = new Set([
+      "rust", "go", "swift", "java", "kotlin", "ruby", "python", "perl",
+      "dart", "scala", "elixir", "crystal", "julia", "lua",
+    ]);
+    const stop = new Set([
+      "the", "a", "an", "is", "are", "of", "to", "in", "on", "for",
+      "and", "or", "how", "what", "when", "where", "why", "with",
+      "vs", "versus", "latest", "new", "best", "top", "today",
+    ]);
+    // Distinctive = length >= 3, not a stopword.
+    const distinctiveTokens = q.toLowerCase()
+      .split(/[^a-z0-9]+/i)
+      .filter(t => t.length >= 3 && !stop.has(t));
+
+    // Only rewrite if there's exactly 1 distinctive token AND it's an
+    // ambiguous language name. This avoids damaging multi-word queries
+    // like "Rust prevention" or "Go travel".
+    if (distinctiveTokens.length === 1 && ambiguousLangs.has(distinctiveTokens[0])) {
+      return `${q} programming`;
+    }
+  }
+
+  // --- 2. Comparison queries ("X vs Y") ---
+  if (/\bvs\.?\b/i.test(q) || /\bversus\b/i.test(q)) {
+    const ambiguousLangs = new Set([
+      "rust", "go", "swift", "java", "kotlin", "ruby", "python", "perl",
+      "dart", "scala", "elixir", "crystal", "julia", "lua",
+    ]);
+    const tokens = q.toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean);
+    const hasAmbiguous = tokens.some(t => ambiguousLangs.has(t));
+    if (hasAmbiguous) {
+      // Both programming languages — add domain context.
+      if (!/\bprogramming\b/i.test(q)) {
+        return `${q} programming comparison`;
+      }
+    }
+    // Generic comparison — add "comparison" if not present.
+    if (!/\bcomparison\b/i.test(q)) {
+      return `${q} comparison`;
+    }
+  }
+
+  // --- 3. News queries with recency ---
+  // For English queries mentioning news terms + recency, add "today" to
+  // bias engines toward articles published today rather than evergreen
+  // news-site homepages. The actual homepage filtering happens in the
+  // `filterNewsHomepages` post-filter, not here.
+  if (opts.recency_days && opts.recency_days > 0 && !isCJK) {
+    if (/\b(news|latest)\b/i.test(q) && !/\btoday\b/i.test(q)) {
+      return `${q} today`;
+    }
+  }
+
+  return q;
+}
+
+/**
+ * News-mode URL filter: drop results that point to a news-site homepage
+ * (root path) when the user asked for recent results.
+ *
+ * When `recency_days > 0`, the user wants *articles*, not site homepages.
+ * CNN, BBC, NYT etc. frequently appear as search results pointing to
+ * their root domain — these are useless for "what's new" queries.
+ *
+ * Heuristic: drop any result whose URL path is empty, "/", or "/index.*".
+ * This catches `https://www.cnn.com/`, `https://www.bbc.com/`, etc.
+ * Article URLs like `https://www.cnn.com/2026/07/01/politics/story.html`
+ * have non-trivial paths and are kept.
+ *
+ * Also drop the well-known aggregator homepages explicitly as a safety net.
+ */
+export function filterNewsHomepages(
+  results: SearchFunctionResultItem[]
+): SearchFunctionResultItem[] {
+  // Known news-site homepages to always drop in news mode.
+  const newsHomepages = new Set([
+    "cnn.com", "www.cnn.com", "bbc.com", "www.bbc.com", "bbc.co.uk",
+    "www.bbc.co.uk", "nytimes.com", "www.nytimes.com", "reuters.com",
+    "www.reuters.com", "apnews.com", "apnews.org", "aljazeera.com",
+    "www.aljazeera.com", "theguardian.com", "www.theguardian.com",
+    "washingtonpost.com", "www.washingtonpost.com", "foxnews.com",
+    "www.foxnews.com", "nbcnews.com", "www.nbcnews.com", "cbsnews.com",
+    "www.cbsnews.com", "abcnews.go.com", "usatoday.com",
+    "www.usatoday.com", "bloomberg.com", "www.bloomberg.com",
+    "ft.com", "www.ft.com", "wsj.com", "www.wsj.com",
+    "sina.com.cn", "www.sina.com.cn", "sohu.com", "www.sohu.com",
+    "163.com", "www.163.com", "qq.com", "www.qq.com", "news.qq.com",
+    "ifeng.com", "www.ifeng.com", "people.com.cn",
+  ]);
+
+  return results.filter(r => {
+    // Drop known homepages.
+    if (newsHomepages.has(r.host_name)) {
+      // But keep if the URL has a non-trivial path (article on the homepage domain).
+      try {
+        const u = new URL(r.url);
+        if (u.pathname === "/" || u.pathname === "" || /^\/index\./i.test(u.pathname)) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+    // Drop ANY root-domain URL (path is "/" or empty) — these are always
+    // homepages, never articles.
+    try {
+      const u = new URL(r.url);
+      if (u.pathname === "/" || u.pathname === "" || /^\/index\./i.test(u.pathname)) {
+        return false;
+      }
+    } catch {
+      // URL parse failure — keep the result, let the consumer decide.
+    }
+    return true;
+  });
+}
