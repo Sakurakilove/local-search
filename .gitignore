@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+package-lock.json
+bun.lock
+yarn.lock
+
+# Build artifacts
+dist/
+*.tsbuildinfo
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
