@@ -9,7 +9,7 @@
  *
  * Options:
  *   --num, -n <N>          Number of results (default: 10, max: 50)
- *   --engine, -e <id>      duckduckgo | bing | google | auto  (default: auto)
+ *   --engine, -e <id>      brave | duckduckgo | bing | google | auto  (default: auto)
  *   --recency-days, -r <N> Restrict to results from last N days
  *   --locale <BCP-47>      Result locale (default: auto-detect from query;
  *                          e.g. en-US, zh-CN, ja-JP, ko-KR, ru-RU)
@@ -89,7 +89,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       case "-e":
       case "--engine": {
         const v = (args[++i] ?? "").toLowerCase();
-        if (!["auto", "duckduckgo", "bing", "google"].includes(v)) {
+        if (!["auto", "brave", "duckduckgo", "bing", "google"].includes(v)) {
           throw new Error(`Invalid engine: ${v}`);
         }
         out.engine = v as SearchEngineId | "auto";
@@ -141,7 +141,7 @@ Usage:
 
 Options:
   --num, -n <N>          Number of results (default: 10, max: 50)
-  --engine, -e <id>      duckduckgo | bing | google | auto  (default: auto)
+  --engine, -e <id>      brave | duckduckgo | bing | google | auto  (default: auto)
   --recency-days, -r <N> Restrict to results from last N days
   --locale <BCP-47>      Result locale (default: auto-detect from query;
                           e.g. en-US, zh-CN, ja-JP, ko-KR, ru-RU)

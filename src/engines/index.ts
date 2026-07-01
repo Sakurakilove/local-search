@@ -8,11 +8,13 @@ import type { SearchEngine, SearchEngineId } from "../types.js";
 import { duckduckgoEngine } from "./duckduckgo.js";
 import { bingEngine } from "./bing.js";
 import { googleEngine } from "./google.js";
+import { braveEngine } from "./brave.js";
 
-export { duckduckgoEngine, bingEngine, googleEngine };
+export { duckduckgoEngine, bingEngine, googleEngine, braveEngine };
 
 /** All engines, keyed by id. */
 export const ENGINES: Record<SearchEngineId, SearchEngine> = {
+  brave: braveEngine,
   duckduckgo: duckduckgoEngine,
   bing: bingEngine,
   google: googleEngine,
@@ -21,24 +23,24 @@ export const ENGINES: Record<SearchEngineId, SearchEngine> = {
 /**
  * Order used by `engine: "auto"`.
  *
- * Rationale:
- *  1. DuckDuckGo — least aggressive blocking, finest-grained date filter,
- *     best CJK and long-tail-query support of the three.
- *  2. Bing       — usually stable from any IP including datacenter; the
- *     second-line fallback when DDG rate-limits us. Weak on long-tail
- *     technical queries (tends to return brand homepages), so the auto
- *     chain's quality gate will often skip past Bing to Google for those.
- *  3. Google     — best result quality when reachable. From datacenter IPs
- *     it usually returns a JS-required wall (~95% of the time), but when
- *     it does work (residential IP, or the rare datacenter success) it
- *     produces the most relevant results. Kept as a last-resort fallback.
+ * v1.6.0 strategy: Brave first (highest quality on first call), then DDG
+ * (good for long-tail technical), then Bing (stable fallback), then Google
+ * (last resort, usually blocked on datacenter IPs).
+ *
+ *  1. Brave      — independent index, best for compound words / brand names /
+ *                  Chinese queries. Aggressively rate-limited (~1 req per
+ *                  few seconds); if it 429s we immediately fall through.
+ *  2. DuckDuckGo — good for long-tail technical queries; frequently rate-
+ *                  limited from datacenter IPs.
+ *  3. Bing       — stable from any IP but weak on long-tail / CJK.
+ *  4. Google     — best quality when reachable; usually blocked on datacenter.
  *
  * The quality-gate logic in `search()` may stop early at any engine that
- * returns a result set with quality >= 30 (i.e., at least 30% of results
- * mention a query token). If no engine clears the gate, the best one is
- * returned with a warning.
+ * returns a result set with quality >= AUTO_QUALITY_THRESHOLD. If no engine
+ * clears the gate, results are merged via SearXNG consensus scoring.
  */
 export const AUTO_ENGINE_ORDER: SearchEngineId[] = [
+  "brave",
   "duckduckgo",
   "bing",
   "google",

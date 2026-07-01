@@ -1,7 +1,7 @@
 {
   "name": "local-search",
-  "version": "1.5.0",
-  "description": "Web search skill that runs entirely on the user's machine. Scrapes DuckDuckGo / Bing / Google HTML with automatic engine fallback. No API key, no cloud dependency.",
+  "version": "1.6.0",
+  "description": "Web search skill with 4 engines (Brave / DuckDuckGo / Bing / Google), automatic fallback, query rewriting, and quality-gated merging. No API key, no cloud dependency.",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",

@@ -32,13 +32,15 @@ import {
 /**
  * Per-engine trust weight, used by `mergeAndRankResults` when the auto
  * chain falls through to cross-engine merging. Higher = more trusted.
- * These are empirical — DDG handles long-tail technical queries better
- * than Bing, so it gets a higher weight.
+ * Empirical: Brave has the best per-result quality when it works;
+ * DDG handles long-tail technical queries well; Bing is stable but
+ * weak on CJK/compound words; Google is best when reachable.
  */
 const ENGINE_WEIGHTS: Record<SearchEngineId, number> = {
+  brave: 1.3,
   duckduckgo: 1.2,
   bing: 1.0,
-  google: 1.1,  // when reachable, Google results are good
+  google: 1.1,
 };
 
 export interface SearchSuccess<T extends "single" | "auto" = "single" | "auto"> {

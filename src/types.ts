@@ -38,7 +38,7 @@ export interface SearchFunctionResultItem {
 }
 
 /** Identifiers of supported search engine backends. */
-export type SearchEngineId = "duckduckgo" | "bing" | "google";
+export type SearchEngineId = "brave" | "duckduckgo" | "bing" | "google";
 
 /** Public options accepted by `search()` / `searchWith()`. */
 export interface SearchOptions {

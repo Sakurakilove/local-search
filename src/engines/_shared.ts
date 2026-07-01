@@ -514,6 +514,7 @@ function normalizeUrlForDedup(url: string): string {
 
 /** Type guard for the engine id list. */
 export const ENGINE_IDS: ReadonlyArray<SearchEngineId> = [
+  "brave",
   "duckduckgo",
   "bing",
   "google",
@@ -617,6 +618,44 @@ export function rewriteQuery(
   if (opts.recency_days && opts.recency_days > 0 && !isCJK) {
     if (/\b(news|latest)\b/i.test(q) && !/\btoday\b/i.test(q)) {
       return `${q} today`;
+    }
+  }
+
+  // --- 4. Reddit intent ---
+  // "best mechanical keyboard reddit" → user wants reddit threads.
+  // NOTE: We do NOT append `site:reddit.com` because DDG/Bing HTML endpoints
+  // don't reliably support the `site:` operator (they return 0 results).
+  // Instead, we just ensure "reddit" stays in the query — engines naturally
+  // surface reddit threads when the word is present. The quality scorer
+  // also gives a bonus to reddit.com results for reddit-intent queries.
+  // (No rewrite needed — just don't strip "reddit".)
+  if (/\breddit\b/i.test(q)) {
+    // Already contains "reddit" — engines will bias toward reddit.com.
+    // Don't add anything; the word itself is the signal.
+  }
+
+  // --- 5. Chinese ambiguous brand names ---
+  // "苹果" alone is ambiguous (Apple Inc vs fruit). When followed by a
+  // product number ("苹果16", "苹果15"), the user almost certainly means
+  // iPhone. Add "iPhone" to disambiguate.
+  // "特斯拉" → "Tesla 汽车" (Tesla the car company, not the inventor).
+  // Only for CJK queries; English queries don't have this ambiguity.
+  if (isCJK) {
+    // 苹果 + 数字 → iPhone
+    if (/苹果\s*\d/i.test(q) && !/iphone|apple/i.test(q)) {
+      return `${q} iPhone`;
+    }
+    // 特斯拉 → Tesla 汽车
+    if (/特斯拉/i.test(q) && !/tesla|汽车|电动车/i.test(q)) {
+      return `${q} Tesla 汽车`;
+    }
+    // 小米 + 产品 → Xiaomi (already handled by context, but add for safety)
+    if (/小米/.test(q) && !/xiaomi|手机|汽车|su7|yu7/i.test(q)) {
+      return `${q} Xiaomi`;
+    }
+    // 华为 → Huawei
+    if (/华为/.test(q) && !/huawei/i.test(q)) {
+      return `${q} Huawei`;
     }
   }
 
